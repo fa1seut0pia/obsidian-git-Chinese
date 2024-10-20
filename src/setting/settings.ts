@@ -67,9 +67,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
             new Setting(containerEl).setName("自动提交和同步").setHeading();
             new Setting(containerEl)
                 .setName("为自动提交和推送设置独立定时器")
-                .setDesc(
-                    "允许为提交和推送使用不同的间隔时间。"
-                )
+                .setDesc("允许为提交和推送使用不同的间隔时间。")
                 .addToggle((toggle) =>
                     toggle
                         .setValue(
@@ -112,9 +110,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                                 } else if (
                                     plugin.settings.autoSaveInterval <= 0
                                 ) {
-                                    new Notice(
-                                        `自动${commitOrSync}已禁用!`
-                                    );
+                                    new Notice(`自动${commitOrSync}已禁用!`);
                                 }
                             } else {
                                 new Notice("请填写一个有效的数字。");
@@ -168,9 +164,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
             setting = new Setting(containerEl)
                 .setName(`自动推送间隔（分钟）`)
-                .setDesc(
-                    "每 X 分钟推送一次提交。设置为 0（默认）表示禁用。"
-                )
+                .setDesc("每 X 分钟推送一次提交。设置为 0（默认）表示禁用。")
                 .addText((text) =>
                     text
                         .setValue(String(plugin.settings.autoPushInterval))
@@ -204,9 +198,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
             new Setting(containerEl)
                 .setName("自动拉取间隔（分钟）")
-                .setDesc(
-                    "每 X 分钟拉取一次更改。设置为 0（默认）表示禁用。"
-                )
+                .setDesc("每 X 分钟拉取一次更改。设置为 0（默认）表示禁用。")
                 .addText((text) =>
                     text
                         .setValue(String(plugin.settings.autoPullInterval))
@@ -235,9 +227,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                 );
 
             new Setting(containerEl)
-                .setName(
-                    `在自动${commitOrSync}上指定自定义提交消息`
-                )
+                .setName(`在自动${commitOrSync}上指定自定义提交消息`)
                 .setDesc("弹出窗口来填写提交消息。")
                 .addToggle((toggle) =>
                     toggle
@@ -345,9 +335,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
             if (plugin.gitManager instanceof SimpleGit)
                 new Setting(containerEl)
                     .setName("合并策略")
-                    .setDesc(
-                        "决定如何将远程分支的提交集成到本地分支。"
-                    )
+                    .setDesc("决定如何将远程分支的提交集成到本地分支。")
                     .addDropdown((dropdown) => {
                         const options: Record<SyncMethod, string> = {
                             merge: "Merge",
@@ -413,9 +401,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                 );
 
             if (plugin.gitManager instanceof SimpleGit) {
-                new Setting(containerEl)
-                    .setName("每行的作者信息")
-                    .setHeading();
+                new Setting(containerEl).setName("每行的作者信息").setHeading();
 
                 this.addLineAuthorInfoSettings();
             }
@@ -459,9 +445,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
         new Setting(containerEl).setName("源代码控制视图").setHeading();
 
         new Setting(containerEl)
-            .setName(
-                "自动刷新文件更改的源代码控制视图"
-            )
+            .setName("自动刷新文件更改的源代码控制视图")
             .setDesc(
                 "在速度较慢的机器上，这可能会导致延迟。如果是这样，只需禁用此选项即可。"
             )
@@ -476,9 +460,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("源代码管理视图刷新间隔")
-            .setDesc(
-                "文件更改后刷新源代码管理视图之前等待的毫秒数。"
-            )
+            .setDesc("文件更改后刷新源代码管理视图之前等待的毫秒数。")
             .addText((toggle) =>
                 toggle
                     .setValue(
@@ -514,9 +496,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
         if (!plugin.settings.disablePopups)
             new Setting(containerEl)
                 .setName("隐藏通知不发生任何变化")
-                .setDesc(
-                    "当没有要提交或推送的更改时，不显示通知。"
-                )
+                .setDesc("当没有要提交或推送的更改时，不显示通知。")
                 .addToggle((toggle) =>
                     toggle
                         .setValue(plugin.settings.disablePopupsForNoChanges)
@@ -528,9 +508,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("显示状态栏")
-            .setDesc(
-                "必须重新启动 Obsidian 才能使更改生效。"
-            )
+            .setDesc("必须重新启动 Obsidian 才能使更改生效。")
             .addToggle((toggle) =>
                 toggle
                     .setValue(plugin.settings.showStatusBar)
@@ -553,9 +531,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("显示分支状态栏")
-            .setDesc(
-                "必须重新启动 Obsidian 才能使更改生效。"
-            )
+            .setDesc("必须重新启动 Obsidian 才能使更改生效。")
             .addToggle((toggle) =>
                 toggle
                     .setValue(plugin.settings.showBranchStatusBar)
@@ -586,9 +562,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
         if (plugin.gitManager instanceof IsomorphicGit)
             new Setting(containerEl)
-                .setName(
-                    "git 服务器上的用户名。例如。您在 GitHub 上的用户名"
-                )
+                .setName("git 服务器上的用户名。例如。您在 GitHub 上的用户名")
                 .addText((cb) => {
                     cb.setValue(plugin.localStorage.getUsername() ?? "");
                     cb.onChange((value) => {
@@ -599,9 +573,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
         if (plugin.gitManager instanceof IsomorphicGit)
             new Setting(containerEl)
                 .setName("Password/个人 access token")
-                .setDesc(
-                    "输入您的密码。你将无法再看到它。"
-                )
+                .setDesc("输入您的密码。你将无法再看到它。")
                 .addText((cb) => {
                     cb.inputEl.autocapitalize = "off";
                     cb.inputEl.autocomplete = "off";
@@ -641,16 +613,14 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("高级")
-            .setDesc(
-                "这些设置通常不需要更改，但特殊设置可能需要更改。"
-            )
+            .setDesc("这些设置通常不需要更改，但特殊设置可能需要更改。")
             .setHeading();
 
         if (plugin.gitManager instanceof SimpleGit) {
             new Setting(containerEl)
                 .setName("更新子模块")
                 .setDesc(
-                    '“提交并推送”和“拉取”负责子模块。缺少的功能：冲突文件、拉取/推送/提交文件的计数。需要为每个子模块设置跟踪分支。'
+                    "“提交并推送”和“拉取”负责子模块。缺少的功能：冲突文件、拉取/推送/提交文件的计数。需要为每个子模块设置跟踪分支。"
                 )
                 .addToggle((toggle) =>
                     toggle
@@ -695,9 +665,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
         if (plugin.gitManager instanceof SimpleGit)
             new Setting(containerEl)
                 .setName("附加环境变量")
-                .setDesc(
-                    "将每一行用于格式为 KEY=VALUE 的新环境变量。"
-                )
+                .setDesc("将每一行用于格式为 KEY=VALUE 的新环境变量。")
                 .addTextArea((cb) => {
                     cb.setPlaceholder("GIT_DIR=/path/to/git/dir");
                     cb.setValue(plugin.localStorage.getEnvVars().join("\n"));
@@ -766,9 +734,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("在此设备上禁用")
-            .setDesc(
-                "在此设备上禁用插件。此设置不会同步。"
-            )
+            .setDesc("在此设备上禁用插件。此设置不会同步。")
             .addToggle((toggle) =>
                 toggle
                     .setValue(plugin.localStorage.getPluginDisabled())
@@ -781,18 +747,14 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                                 .init({ fromReload: true })
                                 .catch((e) => plugin.displayError(e));
                         }
-                        new Notice(
-                            "必须重新启动 Obsidian 才能使更改生效。"
-                        );
+                        new Notice("必须重新启动 Obsidian 才能使更改生效。");
                     })
             );
 
         new Setting(containerEl).setName("支持").setHeading();
         new Setting(containerEl)
             .setName("打赏")
-            .setDesc(
-                "如果您喜欢这个插件，请考虑捐款以支持持续开发。"
-            )
+            .setDesc("如果您喜欢这个插件，请考虑捐款以支持持续开发。")
             .addButton((bt) => {
                 bt.buttonEl.outerHTML =
                     "<a href='https://ko-fi.com/F1F195IQ5' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://cdn.ko-fi.com/cdn/kofi3.png?v=3' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>";
@@ -815,9 +777,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                     4
                 )
             );
-            new Notice(
-                "已将 Debug 信息复制到剪贴板。可能包含敏感信息！"
-            );
+            new Notice("已将 Debug 信息复制到剪贴板。可能包含敏感信息！");
         };
 
         if (Platform.isDesktopApp) {
@@ -959,9 +919,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
             new Setting(this.containerEl)
                 .setName("创作日期显示")
-                .setDesc(
-                    "是否以及如何显示创作行的日期和时间"
-                )
+                .setDesc("是否以及如何显示创作行的日期和时间")
                 .addDropdown((dropdown) => {
                     const options: Record<
                         LineAuthorDateTimeFormatOptions,
