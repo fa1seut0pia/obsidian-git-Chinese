@@ -1,3 +1,18 @@
+obsidian-git 是个很好用的插件, 感谢 obsidian-git 维护人员  
+
+我的英语不好, 于是有了这个fork
+
+此仓库主要是把配置选项翻译成中文, 可能有错误和遗漏, 欢迎反馈或者PR
+
+使用方式:  把 [Releases](./releases) 中的 `main.js` 替换掉 `.obsidian\plugins\obsidian-git\main.js` 即可
+
+README 也做了翻译, 在这里 [README.zn-cn.md](README.zh-cn.md)  
+
+![chinese-config.png](./images/chinese-config.png)
+
+<details>
+  <summary>这里是原始内容</summary>
+
 # Git
 
 A Community Plugin for [Obsidian.md](https://obsidian.md) to manage your vault with Git.
@@ -29,7 +44,7 @@ This view shows the commit history of your repository. You can see the commit me
 
 ![History View](https://raw.githubusercontent.com/Vinzent03/obsidian-git/master/images/history-view.png)
 
-### Diff View 
+### Diff View
 
 You can open the diff view from the source control view or via an extra command.
 
@@ -125,3 +140,5 @@ This plugin was initial developed by [denolehov](https://github.com/denolehov). 
 If you find this plugin useful and would like to support its development, you can support me on Ko-fi.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/F1F195IQ5)
+
+</details>

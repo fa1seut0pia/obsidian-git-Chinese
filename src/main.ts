@@ -663,16 +663,14 @@ export default class ObsidianGit extends Plugin {
             return;
         }
         if (!filesUpdated) {
-            this.displayMessage("Everything is up-to-date");
+            this.displayMessage("全都是最新的了");
         }
 
         if (this.gitManager instanceof SimpleGit) {
             const status = await this.updateCachedStatus();
             if (status.conflicted.length > 0) {
                 this.displayError(
-                    `You have conflicts in ${status.conflicted.length} ${
-                        status.conflicted.length == 1 ? "file" : "files"
-                    }`
+                    `您有${status.conflicted.length}个文件冲突`
                 );
                 await this.handleConflict(status.conflicted);
             }
@@ -1138,7 +1136,7 @@ export default class ObsidianGit extends Plugin {
             status: this.cachedStatus,
         });
         new Notice(
-            "All local changes have been discarded. New files remain untouched."
+            "所有本地更改均已放弃。新文件保持不变。"
         );
     }
 
