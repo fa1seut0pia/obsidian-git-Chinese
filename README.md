@@ -4,7 +4,7 @@ obsidian-git 是个很好用的插件, 感谢 obsidian-git 维护人员
 
 此仓库主要是把配置选项翻译成中文, 可能有错误和遗漏, 欢迎反馈或者PR
 
-使用方式:  把 [Releases](../../releases) 中的 `main.js` 替换掉 `.obsidian\plugins\obsidian-git\main.js` 即可
+使用方式:  把 [Releases](../../releases) 中的 `main.js` 替换掉 `.obsidian\plugins\obsidian-git\main.js` ,然后重启 Obsidian 即可
 
 README 也做了翻译, 在这里 [README.zn-cn.md](README.zh-cn.md)  
 
