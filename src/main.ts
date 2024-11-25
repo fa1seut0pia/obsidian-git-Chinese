@@ -425,6 +425,8 @@ export default class ObsidianGit extends Plugin {
         this.automaticsManager.unload();
         this.branchBar?.remove();
         this.statusBar?.remove();
+        this.gitManager.unload();
+        this.promiseQueue.clear();
 
         for (const interval of this.intervalsToClear) {
             window.clearInterval(interval);
@@ -663,7 +665,7 @@ export default class ObsidianGit extends Plugin {
             return;
         }
         if (!filesUpdated) {
-            this.displayMessage("全都是最新的了");
+            this.displayMessage("拉取: 全都是最新的了");
         }
 
         if (this.gitManager instanceof SimpleGit) {

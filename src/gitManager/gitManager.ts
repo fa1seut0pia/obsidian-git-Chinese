@@ -75,7 +75,7 @@ export abstract class GitManager {
         value: string | number | boolean | undefined
     ): Promise<void>;
 
-    abstract getConfig(path: string): Promise<string>;
+    abstract getConfig(path: string): Promise<string | undefined>;
 
     abstract fetch(remote?: string): Promise<void>;
 
@@ -135,6 +135,8 @@ export abstract class GitManager {
         }
         return filePath;
     }
+
+    unload(): void {}
 
     private _getTreeStructure<T = DiffFile | FileStatusResult>(
         children: (T & { path: string })[],

@@ -174,8 +174,8 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                                     Number(value);
                                 await plugin.saveSettings();
 
+                                plugin.automaticsManager.reload("push");
                                 if (plugin.settings.autoPushInterval > 0) {
-                                    plugin.automaticsManager.reload("push");
                                     new Notice(
                                         `自动推送已启用！每 ${formatMinutes(
                                             plugin.settings.autoPushInterval
@@ -208,8 +208,8 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                                     Number(value);
                                 await plugin.saveSettings();
 
+                                plugin.automaticsManager.reload("pull");
                                 if (plugin.settings.autoPullInterval > 0) {
-                                    plugin.automaticsManager.reload("pull");
                                     new Notice(
                                         `自动拉取已启用！每${formatMinutes(
                                             plugin.settings.autoPullInterval
@@ -587,7 +587,9 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
             new Setting(containerEl)
                 .setName("提交的作者姓名")
                 .addText(async (cb) => {
-                    cb.setValue(await plugin.gitManager.getConfig("user.name"));
+                    cb.setValue(
+                        (await plugin.gitManager.getConfig("user.name")) ?? ""
+                    );
                     cb.onChange(async (value) => {
                         await plugin.gitManager.setConfig(
                             "user.name",
@@ -601,7 +603,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                 .setName("用于提交的作者电子邮件")
                 .addText(async (cb) => {
                     cb.setValue(
-                        await plugin.gitManager.getConfig("user.email")
+                        (await plugin.gitManager.getConfig("user.email")) ?? ""
                     );
                     cb.onChange(async (value) => {
                         await plugin.gitManager.setConfig(
