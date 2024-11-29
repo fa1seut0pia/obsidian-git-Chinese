@@ -11,6 +11,7 @@ import {
     ASK_PASS_INPUT_FILE,
     ASK_PASS_SCRIPT,
     ASK_PASS_SCRIPT_FILE,
+    DEFAULT_WIN_GIT_PATH,
     GIT_LINE_AUTHORING_MOVEMENT_DETECTION_MINIMAL_LENGTH,
 } from "src/constants";
 import type { LineAuthorFollowMovement } from "src/lineAuthor/model";
@@ -32,6 +33,7 @@ export class SimpleGit extends GitManager {
     git: simple.SimpleGit;
     absoluteRepoPath: string;
     watchAbortController: AbortController | undefined;
+    useDefaultWindowsGitPath: boolean = false;
     constructor(plugin: ObsidianGit) {
         super(plugin);
     }
@@ -60,8 +62,15 @@ export class SimpleGit extends GitManager {
 
             this.git = simpleGit({
                 baseDir: basePath,
-                binary: this.plugin.localStorage.getGitPath() || undefined,
+                binary:
+                    this.plugin.localStorage.getGitPath() ||
+                    (this.useDefaultWindowsGitPath
+                        ? DEFAULT_WIN_GIT_PATH
+                        : undefined),
                 config: ["core.quotepath=off"],
+                unsafe: {
+                    allowUnsafeCustomBinary: true,
+                },
             });
             const pathPaths = this.plugin.localStorage.getPATHPaths();
             const envVars = this.plugin.localStorage.getEnvVars();
@@ -100,18 +109,14 @@ export class SimpleGit extends GitManager {
                 ASK_PASS_SCRIPT_FILE
             );
 
-            if (
-                process.env["GIT_ASKPASS"] == undefined &&
-                (await this.getConfig("core.askPass")) == undefined &&
-                process.env["SSH_ASKPASS"] == undefined
-            ) {
-                process.env["GIT_ASKPASS"] = askPassPath;
+            if (process.env["SSH_ASKPASS"] == undefined) {
+                process.env["SSH_ASKPASS"] = askPassPath;
             }
             process.env["OBSIDIAN_GIT_CREDENTIALS_INPUT"] = path.join(
                 absolutePluginConfigPath,
                 ASK_PASS_INPUT_FILE
             );
-            if (process.env["GIT_ASKPASS"] == askPassPath) {
+            if (process.env["SSH_ASKPASS"] == askPassPath) {
                 this.askpass().catch((e) => this.plugin.displayError(e));
             }
         }
@@ -184,18 +189,41 @@ export class SimpleGit extends GitManager {
                 if (!(await adapter.exists(triggerFilePath))) continue;
 
                 const data = await adapter.read(triggerFilePath);
+                let notice: Notice | undefined;
+                // The text is too long for the modal, so a notice is shown instead
+                if (data.length > 60) {
+                    notice = new Notice(data, 999_999);
+                }
                 const response = await new GeneralModal(this.plugin, {
                     allowEmpty: true,
-                    placeholder: data,
+                    placeholder:
+                        data.length > 60
+                            ? "Enter a response to the message."
+                            : data,
                 }).openAndGetResult();
+                notice?.hide();
 
-                await adapter.write(
-                    `${triggerFilePath}.response`,
-                    response ?? ""
-                );
+                // Just in case the trigger file was removed while the modal was open
+                if (await adapter.exists(triggerFilePath)) {
+                    await adapter.write(
+                        `${triggerFilePath}.response`,
+                        response ?? ""
+                    );
+                }
             }
         } catch (error) {
             this.plugin.displayError(error);
+            await fsPromises.rm(
+                path.join(absPluginConfigPath, ASK_PASS_SCRIPT_FILE),
+                { force: true }
+            );
+            await fsPromises.rm(
+                path.join(
+                    absPluginConfigPath,
+                    `${ASK_PASS_SCRIPT_FILE}.response`
+                ),
+                { force: true }
+            );
             await new Promise((res) => setTimeout(res, 5000));
             this.plugin.log("Retry watch for ask pass");
             await this.askpass();
@@ -932,17 +960,31 @@ export class SimpleGit extends GitManager {
 
     private isGitInstalled(): boolean {
         // https://github.com/steveukx/git-js/issues/402
-        const command = spawnSync(
-            this.plugin.localStorage.getGitPath() || "git",
-            ["--version"],
-            {
-                stdio: "ignore",
-            }
-        );
+        const gitPath = this.plugin.localStorage.getGitPath();
+        const command = spawnSync(gitPath || "git", ["--version"], {
+            stdio: "ignore",
+        });
 
         if (command.error) {
-            console.error(command.error);
-            return false;
+            if (Platform.isWin && !gitPath) {
+                this.plugin.log(
+                    `Git not found in PATH. Checking standard installation path(${DEFAULT_WIN_GIT_PATH}) of Git for Windows.`
+                );
+                const command = spawnSync(DEFAULT_WIN_GIT_PATH, ["--version"], {
+                    stdio: "ignore",
+                });
+                if (command.error) {
+                    console.error(command.error);
+                    return false;
+                } else {
+                    this.useDefaultWindowsGitPath = true;
+                }
+            } else {
+                console.error(command.error);
+                return false;
+            }
+        } else {
+            this.useDefaultWindowsGitPath = false;
         }
         return true;
     }

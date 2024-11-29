@@ -77,6 +77,7 @@ export const DIFF_VIEW_CONFIG = {
     icon: "git-pull-request",
 };
 
+export const DEFAULT_WIN_GIT_PATH = "C:\\Program Files\\Git\\cmd\\git.exe";
 export const ASK_PASS_INPUT_FILE = "git_credentials_input";
 export const ASK_PASS_SCRIPT_FILE = "obsidian_askpass.sh";
 
@@ -93,6 +94,10 @@ trap cleanup EXIT
 echo "$PROMPT" > "$TEMP_FILE"
 
 while [ ! -e "$TEMP_FILE.response" ]; do
+    if [ ! -e "$TEMP_FILE" ]; then
+        echo "Trigger file got removed: Abort" >&2
+        exit 1
+    fi
     sleep 0.1
 done
 
