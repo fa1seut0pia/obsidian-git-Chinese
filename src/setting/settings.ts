@@ -482,7 +482,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
             new Setting(containerEl)
                 .setName("差异查看的风格")
                 .setDesc(
-                    '设置差异查看的风格。请注意，“Split” 模式下的实际 diff 不是由 Git 生成的，而是编辑器本身生成的，因此它可能与 Git 生成的 diff 不同。这样做的一个优点是您可以在该视图中编辑文本。'
+                    "设置差异查看的风格。请注意，“Split” 模式下的实际 diff 不是由 Git 生成的，而是编辑器本身生成的，因此它可能与 Git 生成的 diff 不同。这样做的一个优点是您可以在该视图中编辑文本。"
                 )
                 .addDropdown((dropdown) => {
                     const options: Record<
