@@ -21,6 +21,7 @@ import type {
     Blame,
     BlameCommit,
     BranchInfo,
+    DiffFile,
     FileStatusResult,
     LogEntry,
     Status,
@@ -245,13 +246,13 @@ export class SimpleGit extends GitManager {
                 path: res.path,
                 from: res.from,
                 index: e.index === "?" ? "U" : e.index,
-                working_dir: e.working_dir === "?" ? "U" : e.working_dir,
-                vault_path: this.getRelativeVaultPath(res.path),
+                workingDir: e.working_dir === "?" ? "U" : e.working_dir,
+                vaultPath: this.getRelativeVaultPath(res.path),
             };
         });
         return {
             all: allFilesFormatted,
-            changed: allFilesFormatted.filter((e) => e.working_dir !== " "),
+            changed: allFilesFormatted.filter((e) => e.workingDir !== " "),
             staged: allFilesFormatted.filter(
                 (e) => e.index !== " " && e.index != "U"
             ),
@@ -581,8 +582,8 @@ export class SimpleGit extends GitManager {
                     .map((e) => {
                         return <FileStatusResult>{
                             path: e,
-                            working_dir: "P",
-                            vault_path: this.getRelativeVaultPath(e),
+                            workingDir: "P",
+                            vaultPath: this.getRelativeVaultPath(e),
                         };
                     });
             } else {
@@ -707,18 +708,25 @@ export class SimpleGit extends GitManager {
     async log(
         file: string | undefined,
         relativeToVault = true,
-        limit?: number
+        limit?: number,
+        ref?: string
     ): Promise<(LogEntry & { fileName?: string })[]> {
         let path: string | undefined;
         if (file) {
             path = this.getRelativeRepoPath(file, relativeToVault);
         }
-        const res = await this.git.log({
+        const opts: Record<string, unknown> = {
             file: path,
             maxCount: limit,
-            "-m": null,
+            // Ensures that the changed files are listed for merge commits as well and the commit is not repeated for each parent.
+            // This only lists the changed files for the first parent.
+            "--diff-merges": "first-parent",
             "--name-status": null,
-        });
+        };
+        if (ref) {
+            opts[ref] = null;
+        }
+        const res = await this.git.log(opts);
 
         return res.all.map<LogEntry>((e) => ({
             ...e,
@@ -730,13 +738,21 @@ export class SimpleGit extends GitManager {
             diff: {
                 ...e.diff!,
                 files:
-                    e.diff?.files.map((f: simple.DiffResultNameStatusFile) => ({
-                        ...f,
-                        status: f.status!,
-                        path: f.file,
-                        hash: e.hash,
-                        vault_path: this.getRelativeVaultPath(f.file),
-                    })) ?? [],
+                    e.diff?.files.map<DiffFile>(
+                        (f: simple.DiffResultNameStatusFile) => ({
+                            ...f,
+                            status: f.status!,
+                            path: f.file,
+                            hash: e.hash,
+                            vaultPath: this.getRelativeVaultPath(f.file),
+                            fromPath: f.from,
+                            fromVaultPath:
+                                f.from != undefined
+                                    ? this.getRelativeVaultPath(f.from)
+                                    : undefined,
+                            binary: f.binary,
+                        })
+                    ) ?? [],
             },
             fileName: e.diff?.files.first()?.file,
         }));
@@ -900,6 +916,12 @@ export class SimpleGit extends GitManager {
         return await this.git.diff([`${commit1}..${commit2}`, "--", file]);
     }
 
+    async rawCommand(command: string): Promise<string> {
+        const parts = command.split(" "); // Very simple parsing, may need string-argv
+        const res = await this.git.raw(parts[0], ...parts.slice(1));
+        return res;
+    }
+
     async getSubmoduleOfFile(
         repositoryRelativeFile: string
     ): Promise<{ submodule: string; relativeFilepath: string } | undefined> {
@@ -1009,6 +1031,25 @@ export class SimpleGit extends GitManager {
             }
         }
         throw error;
+    }
+
+    async isFileTrackedByLFS(filePath: string): Promise<boolean> {
+        try {
+            // Checks if Gits filter attribute is set to lfs for the file, which means it is (or will be) tracked by LFS.
+            const result = await this.git.raw([
+                "check-attr",
+                "filter",
+                filePath,
+            ]);
+            return result.includes("filter: lfs");
+        } catch (error) {
+            const errorMessage =
+                error instanceof Error ? error.message : String(error);
+            this.plugin.displayError(
+                `Error checking LFS status: ${errorMessage}`
+            );
+            return false;
+        }
     }
 }
 

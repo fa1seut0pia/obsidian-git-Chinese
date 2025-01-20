@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Platform, setIcon, type EventRef } from "obsidian";
+    import { Platform, setIcon } from "obsidian";
     import { SOURCE_CONTROL_VIEW_CONFIG } from "src/constants";
     import type ObsidianGit from "src/main";
     import type {
@@ -9,7 +9,6 @@
     } from "src/types";
     import { CurrentGitAction, FileType } from "src/types";
     import { arrayProxyWithNewLength, getDisplayPath } from "src/utils";
-    import { onDestroy } from "svelte";
     import { slide } from "svelte/transition";
     import { DiscardModal } from "../modals/discardModal";
     import FileComponent from "./components/fileComponent.svelte";
@@ -19,44 +18,67 @@
     import type GitView from "./sourceControl";
     import TooManyFilesComponent from "./components/tooManyFilesComponent.svelte";
 
-    export let plugin: ObsidianGit;
-    export let view: GitView;
-    let loading: boolean;
-    let status: Status | undefined;
-    let lastPulledFiles: FileStatusResult[] = [];
-    let commitMessage = plugin.settings.commitMessage;
-    let buttons: HTMLElement[] = [];
-    let changeHierarchy: StatusRootTreeItem | undefined;
-    let stagedHierarchy: StatusRootTreeItem | undefined;
-    let lastPulledFilesHierarchy: StatusRootTreeItem;
-    let changesOpen = true;
-    let stagedOpen = true;
-    let lastPulledFilesOpen = true;
-
-    let showTree = plugin.settings.treeStructure;
-    let layoutBtn: HTMLElement;
-    let refreshRef: EventRef;
-    $: {
-        if (layoutBtn) {
-            layoutBtn.empty();
-            setIcon(layoutBtn, showTree ? "list" : "folder");
-        }
+    interface Props {
+        plugin: ObsidianGit;
+        view: GitView;
     }
-    refreshRef = view.app.workspace.on(
-        "obsidian-git:view-refresh",
-        () => void refresh().catch(console.error)
+
+    let { plugin, view }: Props = $props();
+    let loading: boolean = $state(false);
+    let status: Status | undefined = $state();
+    let lastPulledFiles: FileStatusResult[] = $state([]);
+    let commitMessage = $state(plugin.settings.commitMessage);
+    let buttons: HTMLElement[] = $state([]);
+    let changeHierarchy: StatusRootTreeItem | undefined = $state();
+    let stagedHierarchy: StatusRootTreeItem | undefined = $state();
+    let lastPulledFilesHierarchy: StatusRootTreeItem | undefined = $state();
+    let changesOpen = $state(true);
+    let stagedOpen = $state(true);
+    let lastPulledFilesOpen = $state(true);
+    let unPushedCommits = $state(0);
+
+    let showTree = $state(plugin.settings.treeStructure);
+    view.registerEvent(
+        view.app.workspace.on(
+            "obsidian-git:loading-status",
+            () => (loading = true)
+        )
     );
-    refresh().catch(console.error);
-    //This should go in the onMount callback, for some reason it doesn't fire though
-    //setTimeout's callback will execute after the current event loop finishes.
-    plugin.app.workspace.onLayoutReady(() => {
-        window.setTimeout(() => {
-            buttons.forEach((btn) => setIcon(btn, btn.getAttr("data-icon")!));
-            setIcon(layoutBtn, showTree ? "list" : "folder");
-        }, 0);
+    view.registerEvent(
+        view.app.workspace.on(
+            "obsidian-git:status-changed",
+            () => void refresh().catch(console.error)
+        )
+    );
+    if (view.plugin.cachedStatus == undefined) {
+        view.plugin.refresh().catch(console.error);
+    } else {
+        refresh().catch(console.error);
+    }
+    $effect(() => {
+        buttons.forEach((btn) => setIcon(btn, btn.getAttr("data-icon")!));
     });
-    onDestroy(() => {
-        view.app.workspace.offref(refreshRef);
+
+    $effect(() => {
+        // highlight push button if there are unpushed commits
+        buttons.forEach((btn) => {
+            // when reloading the view from settings change, the btn are null at first
+            if (!btn || btn.id != "push") return;
+            if (Platform.isMobile) {
+                btn.removeClass("button-border");
+                if (unPushedCommits > 0) {
+                    btn.addClass("button-border");
+                }
+            } else {
+                btn.firstElementChild?.removeAttribute("color");
+                if (unPushedCommits > 0) {
+                    btn.firstElementChild?.setAttr(
+                        "color",
+                        "var(--text-accent)"
+                    );
+                }
+            }
+        });
     });
 
     async function commit() {
@@ -70,9 +92,7 @@
                 plugin.gitManager
                     .commit({ message: commitMessage })
                     .then(async () => {
-                        if (commitMessage !== plugin.settings.commitMessage) {
-                            commitMessage = "";
-                        }
+                        commitMessage = plugin.settings.commitMessage;
                         await plugin.automaticsManager.setUpAutoCommitAndSync();
                     })
                     .finally(triggerRefresh)
@@ -80,16 +100,14 @@
         }
     }
 
-    function backup() {
+    function commitAndSync() {
         loading = true;
         if (status) {
             plugin.promiseQueue.addTask(() =>
                 plugin
                     .commitAndSync(false, false, commitMessage)
                     .then(() => {
-                        if (commitMessage !== plugin.settings.commitMessage) {
-                            commitMessage = "";
-                        }
+                        commitMessage = plugin.settings.commitMessage;
                     })
                     .finally(triggerRefresh)
             );
@@ -101,28 +119,10 @@
             status = undefined;
             return;
         }
-        const unPushedCommits = await plugin.gitManager.getUnpushedCommits();
-
-        buttons.forEach((btn) => {
-            // when reloading the view from settings change, the btn are null at first
-            if (!btn) return;
-            if (Platform.isMobile) {
-                btn.removeClass("button-border");
-                if (btn.id == "push" && unPushedCommits > 0) {
-                    btn.addClass("button-border");
-                }
-            } else {
-                btn.firstElementChild?.removeAttribute("color");
-                if (btn.id == "push" && unPushedCommits > 0) {
-                    btn.firstElementChild?.setAttr(
-                        "color",
-                        "var(--text-accent)"
-                    );
-                }
-            }
-        });
+        unPushedCommits = await plugin.gitManager.getUnpushedCommits();
 
         status = plugin.cachedStatus;
+        loading = false;
         if (
             plugin.lastPulledFiles &&
             plugin.lastPulledFiles != lastPulledFiles
@@ -138,10 +138,10 @@
         }
         if (status) {
             const sort = (a: FileStatusResult, b: FileStatusResult) => {
-                return a.vault_path
+                return a.vaultPath
                     .split("/")
                     .last()!
-                    .localeCompare(getDisplayPath(b.vault_path));
+                    .localeCompare(getDisplayPath(b.vaultPath));
             };
             status.changed.sort(sort);
             status.staged.sort(sort);
@@ -161,7 +161,6 @@
             changeHierarchy = undefined;
             stagedHierarchy = undefined;
         }
-        loading = plugin.loading;
     }
 
     function triggerRefresh() {
@@ -198,7 +197,8 @@
             plugin.pullChangesFromRemote().finally(triggerRefresh)
         );
     }
-    function discard() {
+    function discard(event: Event) {
+        event.stopPropagation();
         new DiscardModal(
             view.app,
             false,
@@ -222,11 +222,11 @@
             }, console.error);
     }
 
-    $: rows = (commitMessage.match(/\n/g) || []).length + 1 || 1;
+    let rows = $derived((commitMessage.match(/\n/g) || []).length + 1 || 1);
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events -->
-<!-- svelte-ignore a11y-no-static-element-interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <main data-type={SOURCE_CONTROL_VIEW_CONFIG.type}>
     <div class="nav-header">
         <div class="nav-buttons-container">
@@ -235,60 +235,62 @@
                 data-icon="arrow-up-circle"
                 class="clickable-icon nav-action-button"
                 aria-label="Commit-and-sync"
-                bind:this={buttons[5]}
-                on:click={backup}
-            />
+                bind:this={buttons[0]}
+                onclick={commitAndSync}
+            ></div>
             <div
                 id="commit-btn"
                 data-icon="check"
                 class="clickable-icon nav-action-button"
                 aria-label="Commit"
-                bind:this={buttons[0]}
-                on:click={commit}
-            />
+                bind:this={buttons[1]}
+                onclick={commit}
+            ></div>
             <div
                 id="stage-all"
                 class="clickable-icon nav-action-button"
                 data-icon="plus-circle"
                 aria-label="Stage all"
-                bind:this={buttons[1]}
-                on:click={stageAll}
-            />
+                bind:this={buttons[2]}
+                onclick={stageAll}
+            ></div>
             <div
                 id="unstage-all"
                 class="clickable-icon nav-action-button"
                 data-icon="minus-circle"
                 aria-label="Unstage all"
-                bind:this={buttons[2]}
-                on:click={unstageAll}
-            />
+                bind:this={buttons[3]}
+                onclick={unstageAll}
+            ></div>
             <div
                 id="push"
                 class="clickable-icon nav-action-button"
                 data-icon="upload"
                 aria-label="Push"
-                bind:this={buttons[3]}
-                on:click={push}
-            />
+                bind:this={buttons[4]}
+                onclick={push}
+            ></div>
             <div
                 id="pull"
                 class="clickable-icon nav-action-button"
                 data-icon="download"
                 aria-label="Pull"
-                bind:this={buttons[4]}
-                on:click={pull}
-            />
+                bind:this={buttons[5]}
+                onclick={pull}
+            ></div>
             <div
                 id="layoutChange"
                 class="clickable-icon nav-action-button"
                 aria-label="Change Layout"
-                bind:this={layoutBtn}
-                on:click={() => {
+                data-icon={showTree ? "list" : "folder"}
+                bind:this={buttons[6]}
+                onclick={() => {
                     showTree = !showTree;
+                    setIcon(buttons[6], showTree ? "list" : "folder");
                     plugin.settings.treeStructure = showTree;
                     void plugin.saveSettings();
                 }}
-            />
+            ></div>
             <div
                 id="refresh"
                 class="clickable-icon nav-action-button"
@@ -296,9 +298,9 @@
                 data-icon="refresh-cw"
                 aria-label="Refresh"
                 style="margin: 1px;"
-                bind:this={buttons[6]}
-                on:click={triggerRefresh}
-            />
+                bind:this={buttons[7]}
+                onclick={triggerRefresh}
+            ></div>
         </div>
     </div>
     <div class="git-commit-msg">
@@ -308,13 +310,13 @@
             spellcheck="true"
             placeholder="Commit Message"
             bind:value={commitMessage}
-        />
+        ></textarea>
         {#if commitMessage}
             <div
                 class="git-commit-msg-clear-button"
-                on:click={() => (commitMessage = "")}
+                onclick={() => (commitMessage = "")}
                 aria-label={"Clear"}
-            />
+            ></div>
         {/if}
     </div>
 
@@ -327,7 +329,7 @@
                 >
                     <div
                         class="tree-item-self is-clickable nav-folder-title"
-                        on:click={() => (stagedOpen = !stagedOpen)}
+                        onclick={() => (stagedOpen = !stagedOpen)}
                     >
                         <div
                             class="tree-item-icon nav-folder-collapse-indicator collapse-icon"
@@ -357,7 +359,7 @@
                                     data-icon="minus"
                                     aria-label="Unstage"
                                     bind:this={buttons[8]}
-                                    on:click|stopPropagation={unstageAll}
+                                    onclick={unstageAll}
                                     class="clickable-icon"
                                 >
                                     <svg
@@ -415,7 +417,7 @@
                     class:is-collapsed={!changesOpen}
                 >
                     <div
-                        on:click={() => (changesOpen = !changesOpen)}
+                        onclick={() => (changesOpen = !changesOpen)}
                         class="tree-item-self is-clickable nav-folder-title"
                     >
                         <div
@@ -445,7 +447,7 @@
                                 <div
                                     data-icon="undo"
                                     aria-label="Discard"
-                                    on:click|stopPropagation={discard}
+                                    onclick={discard}
                                     class="clickable-icon"
                                 >
                                     <svg
@@ -468,7 +470,7 @@
                                     data-icon="plus"
                                     aria-label="Stage"
                                     bind:this={buttons[9]}
-                                    on:click|stopPropagation={stageAll}
+                                    onclick={stageAll}
                                     class="clickable-icon"
                                 >
                                     <svg
@@ -527,14 +529,14 @@
                         </div>
                     {/if}
                 </div>
-                {#if lastPulledFiles.length > 0}
+                {#if lastPulledFiles.length > 0 && lastPulledFilesHierarchy}
                     <div
                         class="pulled nav-folder"
                         class:is-collapsed={!lastPulledFilesOpen}
                     >
                         <div
                             class="tree-item-self is-clickable nav-folder-title"
-                            on:click={() =>
+                            onclick={() =>
                                 (lastPulledFilesOpen = !lastPulledFilesOpen)}
                         >
                             <div

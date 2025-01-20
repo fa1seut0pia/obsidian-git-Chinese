@@ -1,7 +1,9 @@
 import { Errors } from "isomorphic-git";
+import * as path from "path";
 import type { Debouncer, Menu, TAbstractFile, WorkspaceLeaf } from "obsidian";
 import {
     debounce,
+    FileSystemAdapter,
     MarkdownView,
     normalizePath,
     Notice,
@@ -22,6 +24,7 @@ import {
     DEFAULT_SETTINGS,
     DIFF_VIEW_CONFIG,
     HISTORY_VIEW_CONFIG,
+    SPLIT_DIFF_VIEW_CONFIG,
     SOURCE_CONTROL_VIEW_CONFIG,
 } from "./constants";
 import type { GitManager } from "./gitManager/gitManager";
@@ -48,26 +51,25 @@ import GitView from "./ui/sourceControl/sourceControl";
 import { BranchStatusBar } from "./ui/statusBar/branchStatusBar";
 import { splitRemoteBranch } from "./utils";
 import Tools from "./tools";
+import SplitDiffView from "./ui/diff/splitDiffView";
 
 export default class ObsidianGit extends Plugin {
     gitManager: GitManager;
-    automaticsManager: AutomaticsManager;
+    automaticsManager = new AutomaticsManager(this);
     tools = new Tools(this);
-    localStorage: LocalStorageSettings;
+    localStorage = new LocalStorageSettings(this);
     settings: ObsidianGitSettings;
     settingsTab?: ObsidianGitSettingsTab;
     statusBar?: StatusBar;
     branchBar?: BranchStatusBar;
     state: PluginState = {
         gitAction: CurrentGitAction.idle,
-        loading: false,
         offlineMode: false,
     };
     lastPulledFiles: FileStatusResult[];
     gitReady = false;
     promiseQueue: PromiseQueue = new PromiseQueue(this);
     autoCommitDebouncer: Debouncer<[], void> | undefined;
-    loading = false;
     cachedStatus: Status | undefined;
     // Used to store the path of the file that is currently shown in the diff view.
     lastDiffViewState: Record<string, unknown> | undefined;
@@ -82,6 +84,7 @@ export default class ObsidianGit extends Plugin {
     }
 
     async updateCachedStatus(): Promise<Status> {
+        this.app.workspace.trigger("obsidian-git:loading-status");
         this.cachedStatus = await this.gitManager.status();
         if (this.cachedStatus.conflicted.length > 0) {
             this.localStorage.setConflict(true);
@@ -91,6 +94,10 @@ export default class ObsidianGit extends Plugin {
             await this.branchBar?.display();
         }
 
+        this.app.workspace.trigger(
+            "obsidian-git:status-changed",
+            this.cachedStatus
+        );
         return this.cachedStatus;
     }
 
@@ -109,13 +116,10 @@ export default class ObsidianGit extends Plugin {
             gitViews.some((leaf) => !(leaf.isDeferred ?? false)) ||
             historyViews.some((leaf) => !(leaf.isDeferred ?? false))
         ) {
-            this.loading = true;
-            this.app.workspace.trigger("obsidian-git:view-refresh");
-
             await this.updateCachedStatus().catch((e) => this.displayError(e));
-            this.loading = false;
-            this.app.workspace.trigger("obsidian-git:view-refresh");
         }
+
+        this.app.workspace.trigger("obsidian-git:refreshed");
 
         // We don't put a line authoring refresh here, as it would force a re-loading
         // of the line authoring feature - which would lead to a jumpy editor-view in the
@@ -135,8 +139,6 @@ export default class ObsidianGit extends Plugin {
         );
 
         pluginRef.plugin = this;
-
-        this.localStorage = new LocalStorageSettings(this);
 
         this.localStorage.migrate();
         await this.loadSettings();
@@ -215,13 +217,19 @@ export default class ObsidianGit extends Plugin {
 
         this.registerEvent(
             this.app.workspace.on("file-menu", (menu, file, source) => {
-                this.handleFileMenu(menu, file, source);
+                this.handleFileMenu(menu, file, source, "file-manu");
+            })
+        );
+
+        this.registerEvent(
+            this.app.workspace.on("obsidian-git:menu", (menu, path, source) => {
+                this.handleFileMenu(menu, path, source, "obsidian-git:menu");
             })
         );
 
         this.registerEvent(
             this.app.workspace.on("active-leaf-change", (leaf) => {
-                this.handleViewActiveState(leaf);
+                this.onActiveLeafChange(leaf);
             })
         );
         this.registerEvent(
@@ -261,6 +269,9 @@ export default class ObsidianGit extends Plugin {
             return new DiffView(leaf, this);
         });
 
+        this.registerView(SPLIT_DIFF_VIEW_CONFIG.type, (leaf) => {
+            return new SplitDiffView(leaf, this);
+        });
         this.addRibbonIcon(
             "git-pull-request",
             "Open Git source control",
@@ -280,8 +291,6 @@ export default class ObsidianGit extends Plugin {
                     leaf = leafs.first()!;
                 }
                 await this.app.workspace.revealLeaf(leaf);
-
-                this.app.workspace.trigger("obsidian-git:refresh");
             }
         );
 
@@ -310,23 +319,31 @@ export default class ObsidianGit extends Plugin {
         );
     }
 
-    async addFileToGitignore(file: TAbstractFile): Promise<void> {
+    async addFileToGitignore(filePath: string): Promise<void> {
         await this.app.vault.adapter.append(
             this.gitManager.getRelativeVaultPath(".gitignore"),
-            "\n" + this.gitManager.getRelativeRepoPath(file.path, true)
+            "\n" + this.gitManager.getRelativeRepoPath(filePath, true)
         );
         return this.refresh();
     }
 
-    handleFileMenu(menu: Menu, file: TAbstractFile, source: string): void {
+    handleFileMenu(
+        menu: Menu,
+        file: TAbstractFile | string,
+        source: string,
+        type: "file-manu" | "obsidian-git:menu"
+    ): void {
         if (!this.gitReady) return;
         if (!this.settings.showFileMenu) return;
         if (!file) return;
+        let filePath: string;
+        if (typeof file === "string") {
+            filePath = file;
+        } else {
+            filePath = file.path;
+        }
 
-        if (
-            this.settings.showFileMenu &&
-            source == "file-explorer-context-menu"
-        ) {
+        if (source == "file-explorer-context-menu") {
             menu.addItem((item) => {
                 item.setTitle(`Git: Stage`)
                     .setIcon("plus-circle")
@@ -338,12 +355,12 @@ export default class ObsidianGit extends Plugin {
                             } else {
                                 await this.gitManager.stageAll({
                                     dir: this.gitManager.getRelativeRepoPath(
-                                        file.path,
+                                        filePath,
                                         true
                                     ),
                                 });
                             }
-                            this.displayMessage(`Staged ${file.path}`);
+                            this.displayMessage(`Staged ${filePath}`);
                         });
                     });
             });
@@ -358,12 +375,12 @@ export default class ObsidianGit extends Plugin {
                             } else {
                                 await this.gitManager.unstageAll({
                                     dir: this.gitManager.getRelativeRepoPath(
-                                        file.path,
+                                        filePath,
                                         true
                                     ),
                                 });
                             }
-                            this.displayMessage(`Unstaged ${file.path}`);
+                            this.displayMessage(`Unstaged ${filePath}`);
                         });
                     });
             });
@@ -372,7 +389,7 @@ export default class ObsidianGit extends Plugin {
                     .setIcon("file-x")
                     .setSection("action")
                     .onClick((_) => {
-                        this.addFileToGitignore(file).catch((e) =>
+                        this.addFileToGitignore(filePath).catch((e) =>
                             this.displayError(e)
                         );
                     });
@@ -385,11 +402,36 @@ export default class ObsidianGit extends Plugin {
                     .setIcon("file-x")
                     .setSection("action")
                     .onClick((_) => {
-                        this.addFileToGitignore(file).catch((e) =>
+                        this.addFileToGitignore(filePath).catch((e) =>
                             this.displayError(e)
                         );
                     });
             });
+            const gitManager = this.app.vault.adapter;
+            if (
+                type === "obsidian-git:menu" &&
+                gitManager instanceof FileSystemAdapter
+            ) {
+                menu.addItem((item) => {
+                    item.setTitle("Open in default app")
+                        .setIcon("arrow-up-right")
+                        .setSection("action")
+                        .onClick((_) => {
+                            this.app.openWithDefaultApp(filePath);
+                        });
+                });
+                menu.addItem((item) => {
+                    item.setTitle("Show in system explorer")
+                        .setIcon("arrow-up-right")
+                        .setSection("action")
+                        .onClick((_) => {
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+                            (window as any).electron.shell.showItemInFolder(
+                                path.join(gitManager.getBasePath(), filePath)
+                            );
+                        });
+                });
+            }
         }
     }
 
@@ -419,7 +461,6 @@ export default class ObsidianGit extends Plugin {
 
     unloadPlugin() {
         this.gitReady = false;
-        this.app.workspace.trigger("obsidian-git:refresh");
 
         this.lineAuthoringFeature.deactivateFeature();
         this.automaticsManager.unload();
@@ -519,13 +560,14 @@ export default class ObsidianGit extends Plugin {
                     this.lineAuthoringFeature.conditionallyActivateBySettings();
 
                     this.app.workspace.trigger("obsidian-git:refresh");
+                    /// Among other things, this notifies the history view that git is ready
+                    this.app.workspace.trigger("obsidian-git:head-change");
 
                     if (!fromReload && this.settings.autoPullOnBoot) {
                         this.promiseQueue.addTask(() =>
                             this.pullChangesFromRemote()
                         );
                     }
-                    this.automaticsManager = new AutomaticsManager(this);
                     await this.automaticsManager.init();
                     break;
                 default:
@@ -742,7 +784,7 @@ export default class ObsidianGit extends Plugin {
         try {
             let hadConflict = this.localStorage.getConflict();
 
-            let changedFiles: { vault_path: string }[];
+            let changedFiles: { vaultPath: string; path: string }[];
             let status: Status | undefined;
             let unstagedFiles: UnstagedFile[] | undefined;
 
@@ -790,9 +832,10 @@ export default class ObsidianGit extends Plugin {
                         changedFiles = await gitManager.getStagedFiles();
                     } else {
                         unstagedFiles = await gitManager.getUnstagedFiles();
-                        changedFiles = unstagedFiles.map(({ filepath }) => ({
-                            vault_path:
-                                this.gitManager.getRelativeVaultPath(filepath),
+                        changedFiles = unstagedFiles.map(({ path }) => ({
+                            vaultPath:
+                                this.gitManager.getRelativeVaultPath(path),
+                            path,
                         }));
                     }
                 }
@@ -1031,6 +1074,7 @@ export default class ObsidianGit extends Plugin {
         if (selectedBranch != undefined) {
             await this.gitManager.checkout(selectedBranch);
             this.displayMessage(`Switched to ${selectedBranch}`);
+            this.app.workspace.trigger("obsidian-git:refresh");
             await this.branchBar?.display();
             return selectedBranch;
         }
@@ -1136,6 +1180,7 @@ export default class ObsidianGit extends Plugin {
             status: this.cachedStatus,
         });
         new Notice("所有本地更改均已放弃。新文件保持不变。");
+        this.app.workspace.trigger("obsidian-git:refresh");
     }
 
     async handleConflict(conflicted?: string[]): Promise<void> {
@@ -1249,9 +1294,14 @@ I strongly recommend to use "Source mode" for viewing the conflicted files. For 
         }
     }
 
-    handleViewActiveState(leaf: WorkspaceLeaf | null): void {
+    onActiveLeafChange(leaf: WorkspaceLeaf | null): void {
+        const view = leaf?.view;
         // Prevent removing focus when switching to other panes than file panes like search or GitView
-        if (!leaf?.view.getState().file) return;
+        if (
+            !view?.getState().file &&
+            !(view instanceof DiffView || view instanceof SplitDiffView)
+        )
+            return;
 
         const sourceControlLeaf = this.app.workspace
             .getLeavesOfType(SOURCE_CONTROL_VIEW_CONFIG.type)
@@ -1268,23 +1318,22 @@ I strongly recommend to use "Source mode" for viewing the conflicted files. For 
             .querySelector(`div.nav-file-title.is-active`)
             ?.removeClass("is-active");
 
-        if (leaf?.view instanceof DiffView) {
-            const path = leaf.view.state.file;
+        if (
+            leaf?.view instanceof DiffView ||
+            leaf?.view instanceof SplitDiffView
+        ) {
+            const path = leaf.view.state.bFile;
             this.lastDiffViewState = leaf.view.getState();
             let el: Element | undefined | null;
-            if (sourceControlLeaf && leaf.view.state.staged) {
+            if (sourceControlLeaf && leaf.view.state.aRef == "HEAD") {
                 el = sourceControlLeaf.view.containerEl.querySelector(
                     `div.staged div.nav-file-title[data-path='${path}']`
                 );
-            } else if (
-                sourceControlLeaf &&
-                leaf.view.state.staged === false &&
-                !leaf.view.state.hash
-            ) {
+            } else if (sourceControlLeaf && leaf.view.state.aRef == "") {
                 el = sourceControlLeaf.view.containerEl.querySelector(
                     `div.changes div.nav-file-title[data-path='${path}']`
                 );
-            } else if (historyLeaf && leaf.view.state.hash) {
+            } else if (historyLeaf) {
                 el = historyLeaf.view.containerEl.querySelector(
                     `div.nav-file-title[data-path='${path}']`
                 );
