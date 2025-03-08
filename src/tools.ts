@@ -62,11 +62,9 @@ export default class Tools {
 
             if (tooBigFiles.length > 0) {
                 this.plugin.displayError(
-                    `Aborted commit, because the following files are too big:\n- ${tooBigFiles
+                    `提交终止，因为以下文件太大:\n- ${tooBigFiles
                         .map((e) => e.vaultPath)
-                        .join(
-                            "\n- "
-                        )}\nPlease remove them or add to .gitignore.`
+                        .join("\n- ")}\n请删除它们或添加到 .gitignore 中。`
                 );
 
                 return true;
