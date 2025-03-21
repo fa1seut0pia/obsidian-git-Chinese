@@ -418,9 +418,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("源代码管理视图刷新间隔")
-            .setDesc(
-                "文件更改后刷新源代码管理视图之前等待的毫秒数。"
-            )
+            .setDesc("文件更改后刷新源代码管理视图之前等待的毫秒数。")
             .addText((text) => {
                 text.inputEl.type = "number";
                 text.setValue(
