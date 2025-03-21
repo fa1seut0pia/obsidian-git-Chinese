@@ -91,32 +91,18 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                             : "提交和推送"
                     }每 X 分钟执行一次。设置为 0（默认）表示禁用。（请参阅下面的设置以进行进一步配置！）`
                 )
-                .addText((text) =>
-                    text
-                        .setValue(String(plugin.settings.autoSaveInterval))
-                        .onChange(async (value) => {
-                            if (!isNaN(Number(value))) {
-                                plugin.settings.autoSaveInterval =
-                                    Number(value);
-                                await plugin.saveSettings();
-
-                                plugin.automaticsManager.reload("commit");
-                                if (plugin.settings.autoSaveInterval > 0) {
-                                    new Notice(
-                                        `自动${commitOrSync}已启用! 每 ${formatMinutes(
-                                            plugin.settings.autoSaveInterval
-                                        )}执行一次。`
-                                    );
-                                } else if (
-                                    plugin.settings.autoSaveInterval <= 0
-                                ) {
-                                    new Notice(`自动${commitOrSync}已禁用!`);
-                                }
-                            } else {
-                                new Notice("请填写一个有效的数字。");
-                            }
-                        })
-                );
+                .addText((text) => {
+                    text.inputEl.type = "number";
+                    text.setValue(String(plugin.settings.autoSaveInterval));
+                    text.setPlaceholder(
+                        String(DEFAULT_SETTINGS.autoSaveInterval)
+                    );
+                    text.onChange(async (value) => {
+                        plugin.settings.autoSaveInterval = Number(value);
+                        await plugin.saveSettings();
+                        plugin.automaticsManager.reload("commit");
+                    });
+                });
 
             setting = new Setting(containerEl)
                 .setName(`文件停止编辑后自动${commitOrSync}`)
@@ -165,32 +151,18 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
             setting = new Setting(containerEl)
                 .setName(`自动推送间隔（分钟）`)
                 .setDesc("每 X 分钟推送一次提交。设置为 0（默认）表示禁用。")
-                .addText((text) =>
-                    text
-                        .setValue(String(plugin.settings.autoPushInterval))
-                        .onChange(async (value) => {
-                            if (!isNaN(Number(value))) {
-                                plugin.settings.autoPushInterval =
-                                    Number(value);
-                                await plugin.saveSettings();
-
-                                plugin.automaticsManager.reload("push");
-                                if (plugin.settings.autoPushInterval > 0) {
-                                    new Notice(
-                                        `自动推送已启用！每 ${formatMinutes(
-                                            plugin.settings.autoPushInterval
-                                        )}执行一次。`
-                                    );
-                                } else if (
-                                    plugin.settings.autoPushInterval <= 0
-                                ) {
-                                    new Notice("自动推送已禁用！");
-                                }
-                            } else {
-                                new Notice("请填写一个有效的数字。");
-                            }
-                        })
-                );
+                .addText((text) => {
+                    text.inputEl.type = "number";
+                    text.setValue(String(plugin.settings.autoPushInterval));
+                    text.setPlaceholder(
+                        String(DEFAULT_SETTINGS.autoPushInterval)
+                    );
+                    text.onChange(async (value) => {
+                        plugin.settings.autoPushInterval = Number(value);
+                        await plugin.saveSettings();
+                        plugin.automaticsManager.reload("push");
+                    });
+                });
             this.mayDisableSetting(
                 setting,
                 !plugin.settings.differentIntervalCommitAndPush
@@ -199,32 +171,18 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
             new Setting(containerEl)
                 .setName("自动拉取间隔（分钟）")
                 .setDesc("每 X 分钟拉取一次更改。设置为 0（默认）表示禁用。")
-                .addText((text) =>
-                    text
-                        .setValue(String(plugin.settings.autoPullInterval))
-                        .onChange(async (value) => {
-                            if (!isNaN(Number(value))) {
-                                plugin.settings.autoPullInterval =
-                                    Number(value);
-                                await plugin.saveSettings();
-
-                                plugin.automaticsManager.reload("pull");
-                                if (plugin.settings.autoPullInterval > 0) {
-                                    new Notice(
-                                        `自动拉取已启用！每${formatMinutes(
-                                            plugin.settings.autoPullInterval
-                                        )}执行一次。`
-                                    );
-                                } else if (
-                                    plugin.settings.autoPullInterval <= 0
-                                ) {
-                                    new Notice("自动拉取已禁用！");
-                                }
-                            } else {
-                                new Notice("请填写一个有效的数字。");
-                            }
-                        })
-                );
+                .addText((text) => {
+                    text.inputEl.type = "number";
+                    text.setValue(String(plugin.settings.autoPullInterval));
+                    text.setPlaceholder(
+                        String(DEFAULT_SETTINGS.autoPullInterval)
+                    );
+                    text.onChange(async (value) => {
+                        plugin.settings.autoPullInterval = Number(value);
+                        await plugin.saveSettings();
+                        plugin.automaticsManager.reload("pull");
+                    });
+                });
 
             new Setting(containerEl)
                 .setName(`在自动${commitOrSync}上指定自定义提交消息`)
@@ -460,23 +418,27 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("源代码管理视图刷新间隔")
-            .setDesc("文件更改后刷新源代码管理视图之前等待的毫秒数。")
-            .addText((toggle) =>
-                toggle
-                    .setValue(
-                        plugin.settings.refreshSourceControlTimer.toString()
-                    )
-                    .setPlaceholder("7000")
-                    .onChange(async (value) => {
-                        plugin.settings.refreshSourceControlTimer = Math.max(
-                            parseInt(value),
-                            500
-                        );
-                        await plugin.saveSettings();
-                        plugin.setRefreshDebouncer();
-                    })
-            );
-        new Setting(containerEl).setName("杂项").setHeading();
+            .setDesc(
+                "文件更改后刷新源代码管理视图之前等待的毫秒数。"
+            )
+            .addText((text) => {
+                text.inputEl.type = "number";
+                text.setValue(
+                    String(plugin.settings.refreshSourceControlTimer)
+                );
+                text.setPlaceholder(
+                    String(DEFAULT_SETTINGS.refreshSourceControlTimer)
+                );
+                text.onChange(async (value) => {
+                    plugin.settings.refreshSourceControlTimer = Math.max(
+                        Number(value),
+                        500
+                    );
+                    await plugin.saveSettings();
+                    plugin.setRefreshDebouncer();
+                });
+            });
+        new Setting(containerEl).setName("Miscellaneous").setHeading();
 
         if (plugin.gitManager instanceof SimpleGit) {
             new Setting(containerEl)
