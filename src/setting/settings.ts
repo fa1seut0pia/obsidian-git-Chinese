@@ -1,5 +1,12 @@
-import type { App, RGB } from "obsidian";
-import { moment, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
+import type { App, RGB, TextComponent } from "obsidian";
+import {
+    moment,
+    Notice,
+    Platform,
+    PluginSettingTab,
+    Setting,
+    TextAreaComponent,
+} from "obsidian";
 import {
     DATE_TIME_FORMAT_SECONDS,
     DEFAULT_SETTINGS,
@@ -21,7 +28,7 @@ import type {
     ShowAuthorInHistoryView,
     SyncMethod,
 } from "src/types";
-import { convertToRgb, rgbToString, formatMinutes } from "src/utils";
+import { convertToRgb, formatMinutes, rgbToString } from "src/utils";
 
 const FORMAT_STRING_REFERENCE_URL =
     "https://momentjs.com/docs/#/parsing/string-format/";
@@ -78,7 +85,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                                 value;
                             await plugin.saveSettings();
                             plugin.automaticsManager.reload("commit", "push");
-                            this.display();
+                            this.refreshDisplayWithDelay();
                         })
                 );
 
@@ -93,12 +100,20 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                 )
                 .addText((text) => {
                     text.inputEl.type = "number";
-                    text.setValue(String(plugin.settings.autoSaveInterval));
+                    this.setNonDefaultValue({
+                        text,
+                        settingsProperty: "autoSaveInterval",
+                    });
                     text.setPlaceholder(
                         String(DEFAULT_SETTINGS.autoSaveInterval)
                     );
                     text.onChange(async (value) => {
-                        plugin.settings.autoSaveInterval = Number(value);
+                        if (value !== "") {
+                            plugin.settings.autoSaveInterval = Number(value);
+                        } else {
+                            plugin.settings.autoSaveInterval =
+                                DEFAULT_SETTINGS.autoSaveInterval;
+                        }
                         await plugin.saveSettings();
                         plugin.automaticsManager.reload("commit");
                     });
@@ -118,7 +133,8 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                         .setValue(plugin.settings.autoBackupAfterFileChange)
                         .onChange(async (value) => {
                             plugin.settings.autoBackupAfterFileChange = value;
-                            this.display();
+                            this.refreshDisplayWithDelay();
+
                             await plugin.saveSettings();
                             plugin.automaticsManager.reload("commit");
                         })
@@ -140,7 +156,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                             plugin.settings.setLastSaveToLastCommit = value;
                             await plugin.saveSettings();
                             plugin.automaticsManager.reload("commit");
-                            this.display();
+                            this.refreshDisplayWithDelay();
                         })
                 );
             this.mayDisableSetting(
@@ -153,12 +169,20 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                 .setDesc("每 X 分钟推送一次提交。设置为 0（默认）表示禁用。")
                 .addText((text) => {
                     text.inputEl.type = "number";
-                    text.setValue(String(plugin.settings.autoPushInterval));
+                    this.setNonDefaultValue({
+                        text,
+                        settingsProperty: "autoPushInterval",
+                    });
                     text.setPlaceholder(
                         String(DEFAULT_SETTINGS.autoPushInterval)
                     );
                     text.onChange(async (value) => {
-                        plugin.settings.autoPushInterval = Number(value);
+                        if (value !== "") {
+                            plugin.settings.autoPushInterval = Number(value);
+                        } else {
+                            plugin.settings.autoPushInterval =
+                                DEFAULT_SETTINGS.autoPushInterval;
+                        }
                         await plugin.saveSettings();
                         plugin.automaticsManager.reload("push");
                     });
@@ -173,16 +197,38 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                 .setDesc("每 X 分钟拉取一次更改。设置为 0（默认）表示禁用。")
                 .addText((text) => {
                     text.inputEl.type = "number";
-                    text.setValue(String(plugin.settings.autoPullInterval));
+                    this.setNonDefaultValue({
+                        text,
+                        settingsProperty: "autoPullInterval",
+                    });
                     text.setPlaceholder(
                         String(DEFAULT_SETTINGS.autoPullInterval)
                     );
                     text.onChange(async (value) => {
-                        plugin.settings.autoPullInterval = Number(value);
+                        if (value !== "") {
+                            plugin.settings.autoPullInterval = Number(value);
+                        } else {
+                            plugin.settings.autoPullInterval =
+                                DEFAULT_SETTINGS.autoPullInterval;
+                        }
                         await plugin.saveSettings();
                         plugin.automaticsManager.reload("pull");
                     });
                 });
+
+            new Setting(containerEl)
+                .setName(`Auto ${commitOrSync} only staged files`)
+                .setDesc(
+                    `If turned on, only staged files are committed on ${commitOrSync}. If turned off, all changed files are committed.`
+                )
+                .addToggle((toggle) =>
+                    toggle
+                        .setValue(plugin.settings.autoCommitOnlyStaged)
+                        .onChange(async (value) => {
+                            plugin.settings.autoCommitOnlyStaged = value;
+                            await plugin.saveSettings();
+                        })
+                );
 
             new Setting(containerEl)
                 .setName(`在自动${commitOrSync}上指定自定义提交消息`)
@@ -193,7 +239,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                         .onChange(async (value) => {
                             plugin.settings.customMessageOnAutoBackup = value;
                             await plugin.saveSettings();
-                            this.display();
+                            this.refreshDisplayWithDelay();
                         })
                 );
 
@@ -203,15 +249,23 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                     "可用占位符：{{date}}" +
                         "（见下文）、{{hostname}}（见下文）、{{numFiles}}（提交中更改的文件数）和 {{files}}（提交消息中更改的文件）。"
                 )
-                .addTextArea((text) =>
-                    text
-                        .setPlaceholder("vault backup: {{date}}")
-                        .setValue(plugin.settings.autoCommitMessage)
-                        .onChange(async (value) => {
+                .addTextArea((text) => {
+                    text.setPlaceholder(
+                        DEFAULT_SETTINGS.autoCommitMessage
+                    ).onChange(async (value) => {
+                        if (value === "") {
+                            plugin.settings.autoCommitMessage =
+                                DEFAULT_SETTINGS.autoCommitMessage;
+                        } else {
                             plugin.settings.autoCommitMessage = value;
-                            await plugin.saveSettings();
-                        })
-                );
+                        }
+                        await plugin.saveSettings();
+                    });
+                    this.setNonDefaultValue({
+                        text,
+                        settingsProperty: "autoCommitMessage",
+                    });
+                });
             this.mayDisableSetting(
                 setting,
                 plugin.settings.customMessageOnAutoBackup
@@ -225,19 +279,44 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                     "可用占位符：{{date}}" +
                         "（见下文）、{{hostname}}（见下文）、{{numFiles}}（提交中更改的文件数）和 {{files}}（提交消息中更改的文件）。"
                 )
-                .addTextArea((text) =>
-                    text
-                        .setPlaceholder("vault 备份：{{date}}")
-                        .setValue(
-                            plugin.settings.commitMessage
-                                ? plugin.settings.commitMessage
-                                : ""
-                        )
-                        .onChange(async (value) => {
+                .addTextArea((text) => {
+                    text.setPlaceholder(
+                        DEFAULT_SETTINGS.commitMessage
+                    ).onChange(async (value) => {
+                        if (value === "") {
+                            plugin.settings.commitMessage =
+                                DEFAULT_SETTINGS.commitMessage;
+                        } else {
                             plugin.settings.commitMessage = value;
-                            await plugin.saveSettings();
-                        })
-                );
+                        }
+                        await plugin.saveSettings();
+                    });
+                    this.setNonDefaultValue({
+                        text,
+                        settingsProperty: "commitMessage",
+                    });
+                });
+
+            new Setting(containerEl)
+                .setName("Commit message script")
+                .setDesc(
+                    "A script that is run using 'sh -c' to generate the commit message. May be used to generate commit messages using AI tools. Available placeholders: {{hostname}}, {{date}}."
+                )
+                .addText((text) => {
+                    text.onChange(async (value) => {
+                        if (value === "") {
+                            plugin.settings.commitMessageScript =
+                                DEFAULT_SETTINGS.commitMessageScript;
+                        } else {
+                            plugin.settings.commitMessageScript = value;
+                        }
+                        await plugin.saveSettings();
+                    });
+                    this.setNonDefaultValue({
+                        text,
+                        settingsProperty: "commitMessageScript",
+                    });
+                });
 
             const datePlaceholderSetting = new Setting(containerEl)
                 .setName("{{date}} 占位符格式")
@@ -338,7 +417,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                         .setValue(!plugin.settings.disablePush)
                         .onChange(async (value) => {
                             plugin.settings.disablePush = !value;
-                            this.display();
+                            this.refreshDisplayWithDelay();
                             await plugin.saveSettings();
                         })
                 );
@@ -353,7 +432,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                         .setValue(plugin.settings.pullBeforePush)
                         .onChange(async (value) => {
                             plugin.settings.pullBeforePush = value;
-                            this.display();
+                            this.refreshDisplayWithDelay();
                             await plugin.saveSettings();
                         })
                 );
@@ -420,18 +499,26 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
             .setName("源代码管理视图刷新间隔")
             .setDesc("文件更改后刷新源代码管理视图之前等待的毫秒数。")
             .addText((text) => {
+                const MIN_SOURCE_CONTROL_REFRESH_INTERVAL = 500;
                 text.inputEl.type = "number";
-                text.setValue(
-                    String(plugin.settings.refreshSourceControlTimer)
-                );
+                this.setNonDefaultValue({
+                    text,
+                    settingsProperty: "refreshSourceControlTimer",
+                });
                 text.setPlaceholder(
                     String(DEFAULT_SETTINGS.refreshSourceControlTimer)
                 );
                 text.onChange(async (value) => {
-                    plugin.settings.refreshSourceControlTimer = Math.max(
-                        Number(value),
-                        500
-                    );
+                    // Without this check, if the textbox is empty or the input is invalid, MIN_SOURCE_CONTROL_REFRESH_INTERVAL would be saved instead of saving the default value.
+                    if (value !== "" && Number.isInteger(Number(value))) {
+                        plugin.settings.refreshSourceControlTimer = Math.max(
+                            Number(value),
+                            MIN_SOURCE_CONTROL_REFRESH_INTERVAL
+                        );
+                    } else {
+                        plugin.settings.refreshSourceControlTimer =
+                            DEFAULT_SETTINGS.refreshSourceControlTimer;
+                    }
                     await plugin.saveSettings();
                     plugin.setRefreshDebouncer();
                 });
@@ -464,16 +551,30 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
         }
 
         new Setting(containerEl)
-            .setName("禁用通知")
+            .setName("禁用信息通知")
             .setDesc(
-                "禁用 git 操作的通知以最大程度地减少干扰（请参阅状态栏了解更新）。即使您启用此设置，错误仍会显示为通知。"
+                "禁用 git 操作的信息通知，以减少干扰（请参考状态栏的更新）。"
             )
             .addToggle((toggle) =>
                 toggle
                     .setValue(plugin.settings.disablePopups)
                     .onChange(async (value) => {
                         plugin.settings.disablePopups = value;
-                        this.display();
+                        this.refreshDisplayWithDelay();
+                        await plugin.saveSettings();
+                    })
+            );
+
+        new Setting(containerEl)
+            .setName("Disable error notifications")
+            .setDesc(
+                "Disable error notifications of any kind to minimize distraction (refer to status bar for updates)."
+            )
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(!plugin.settings.showErrorNotices)
+                    .onChange(async (value) => {
+                        plugin.settings.showErrorNotices = !value;
                         await plugin.saveSettings();
                     })
             );
@@ -504,7 +605,10 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
-            .setName("在文件菜单中显示暂存/取消暂存按钮。")
+            .setName("文件菜单集成")
+            .setDesc(
+                `在文件菜单中添加 "Stage"、"Unstage "和 "Add to .gitignore "操作。`
+            )
             .addToggle((toggle) =>
                 toggle
                     .setValue(plugin.settings.showFileMenu)
@@ -600,7 +704,9 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("高级")
-            .setDesc("这些设置通常不需要更改，但特殊设置可能需要更改。")
+            .setDesc(
+                "这些设置通常无需更改，但特殊设置可能需要更改。"
+            )
             .setHeading();
 
         if (plugin.gitManager instanceof SimpleGit) {
@@ -812,7 +918,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
     }
 
     /**
-     * Ensure, that certain last shown values are persisten in the settings.
+     * Ensure, that certain last shown values are persistent in the settings.
      *
      * Necessary for the line author info gutter context menus.
      */
@@ -845,7 +951,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
         baseLineAuthorInfoSetting.addToggle((toggle) =>
             toggle.setValue(this.settings.lineAuthor.show).onChange((value) => {
                 this.configureLineAuthorShowStatus(value);
-                this.display();
+                this.refreshDisplayWithDelay();
             })
         );
 
@@ -929,7 +1035,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                                 "dateTimeFormatOptions",
                                 value
                             );
-                            this.display();
+                            this.refreshDisplayWithDelay();
                         }
                     );
                 });
@@ -1029,8 +1135,8 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
                     });
                 }).descEl.innerHTML = `
                     The CSS color of the gutter text.<br/>
-                    
-                    It is higly recommended to use
+
+                    It is highly recommended to use
                     <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Using_CSS_custom_properties">
                     CSS variables</a>
                     defined by themes
@@ -1154,6 +1260,43 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
             </br>Smallest valid age is "1d". Currently: ${durationString}`,
             duration,
         ] as const;
+    }
+
+    /**
+     * Sets the value in the textbox for a given setting only if the saved value differs from the default value.
+     * If the saved value is the default value, it probably wasn't defined by the user, so it's better to display it as a placeholder.
+     */
+    private setNonDefaultValue({
+        settingsProperty,
+        text,
+    }: {
+        settingsProperty: keyof ObsidianGitSettings;
+        text: TextComponent | TextAreaComponent;
+    }): void {
+        const storedValue = this.plugin.settings[settingsProperty];
+        const defaultValue = DEFAULT_SETTINGS[settingsProperty];
+
+        if (defaultValue !== storedValue) {
+            // Doesn't add "" to saved strings
+            if (
+                typeof storedValue === "string" ||
+                typeof storedValue === "number" ||
+                typeof storedValue === "boolean"
+            ) {
+                text.setValue(String(storedValue));
+            } else {
+                text.setValue(JSON.stringify(storedValue));
+            }
+        }
+    }
+
+    /**
+     * Delays the update of the settings UI.
+     * Used when the user toggles one of the settings that control enabled states of other settings. Delaying the update
+     * allows most of the toggle animation to run, instead of abruptly jumping between enabled/disabled states.
+     */
+    private refreshDisplayWithDelay(timeout = 80): void {
+        setTimeout(() => this.display(), timeout);
     }
 }
 

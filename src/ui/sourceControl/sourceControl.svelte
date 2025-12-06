@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Platform, setIcon } from "obsidian";
+    import { Platform, Scope, setIcon } from "obsidian";
     import { SOURCE_CONTROL_VIEW_CONFIG } from "src/constants";
     import type ObsidianGit from "src/main";
     import type {
@@ -7,10 +7,9 @@
         Status,
         StatusRootTreeItem,
     } from "src/types";
-    import { CurrentGitAction, FileType } from "src/types";
+    import { FileType } from "src/types";
     import { arrayProxyWithNewLength, getDisplayPath } from "src/utils";
     import { slide } from "svelte/transition";
-    import { DiscardModal } from "../modals/discardModal";
     import FileComponent from "./components/fileComponent.svelte";
     import PulledFileComponent from "./components/pulledFileComponent.svelte";
     import StagedFileComponent from "./components/stagedFileComponent.svelte";
@@ -36,6 +35,9 @@
     let stagedOpen = $state(true);
     let lastPulledFilesOpen = $state(true);
     let unPushedCommits = $state(0);
+    let stagedClosed: Record<string, boolean> = $state({});
+    let unstagedClosed: Record<string, boolean> = $state({});
+    let pulledClosed: Record<string, boolean> = $state({});
 
     let showTree = $state(plugin.settings.treeStructure);
     view.registerEvent(
@@ -81,16 +83,18 @@
         });
     });
 
-    async function commit() {
+    view.scope = new Scope(plugin.app.scope);
+    view.scope.register(["Ctrl"], "Enter", (_: KeyboardEvent) =>
+        commitAndSync()
+    );
+
+    function commit() {
         loading = true;
         if (status) {
-            if (await plugin.tools.hasTooBigFiles(status.staged)) {
-                plugin.setPluginState({ gitAction: CurrentGitAction.idle });
-                return false;
-            }
+            const onlyStaged = status.staged.length > 0;
             plugin.promiseQueue.addTask(() =>
-                plugin.gitManager
-                    .commit({ message: commitMessage })
+                plugin
+                    .commit({ fromAuto: false, commitMessage, onlyStaged })
                     .then(() => (commitMessage = plugin.settings.commitMessage))
                     .finally(triggerRefresh)
             );
@@ -100,9 +104,16 @@
     function commitAndSync() {
         loading = true;
         if (status) {
+            // If staged files exist only commit them, but if not, commit all.
+            // I hope this is the most intuitive way.
+            const onlyStaged = status.staged.length > 0;
             plugin.promiseQueue.addTask(() =>
                 plugin
-                    .commitAndSync(false, false, commitMessage)
+                    .commitAndSync({
+                        fromAutoBackup: false,
+                        commitMessage,
+                        onlyStaged,
+                    })
                     .then(() => {
                         commitMessage = plugin.settings.commitMessage;
                     })
@@ -164,7 +175,8 @@
         view.app.workspace.trigger("obsidian-git:refresh");
     }
 
-    function stageAll() {
+    function stageAll(event: MouseEvent) {
+        event.stopPropagation();
         loading = true;
         plugin.promiseQueue.addTask(() =>
             plugin.gitManager
@@ -173,7 +185,8 @@
         );
     }
 
-    function unstageAll() {
+    function unstageAll(event: MouseEvent) {
+        event.stopPropagation();
         loading = true;
         plugin.promiseQueue.addTask(() =>
             plugin.gitManager
@@ -196,27 +209,7 @@
     }
     function discard(event: Event) {
         event.stopPropagation();
-        new DiscardModal(
-            view.app,
-            false,
-            plugin.gitManager.getRelativeVaultPath("/")
-        )
-            .myOpen()
-            .then((shouldDiscard) => {
-                if (shouldDiscard === true) {
-                    plugin.promiseQueue.addTask(() =>
-                        plugin.gitManager
-                            .discardAll({
-                                status: plugin.cachedStatus,
-                            })
-                            .finally(() => {
-                                view.app.workspace.trigger(
-                                    "obsidian-git:refresh"
-                                );
-                            })
-                    );
-                }
-            }, console.error);
+        void plugin.discardAll();
     }
 
     let rows = $derived((commitMessage.match(/\n/g) || []).length + 1 || 1);
@@ -224,7 +217,7 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<main data-type={SOURCE_CONTROL_VIEW_CONFIG.type}>
+<main data-type={SOURCE_CONTROL_VIEW_CONFIG.type} class="git-view">
     <div class="nav-header">
         <div class="nav-buttons-container">
             <div
@@ -294,7 +287,6 @@
                 class:loading
                 data-icon="refresh-cw"
                 aria-label="Refresh"
-                style="margin: 1px;"
                 bind:this={buttons[7]}
                 onclick={triggerRefresh}
             ></div>
@@ -395,6 +387,7 @@
                                     {view}
                                     fileType={FileType.staged}
                                     topLevel={true}
+                                    bind:closed={stagedClosed}
                                 />
                             {:else}
                                 {#each arrayProxyWithNewLength(status.staged, 500) as stagedFile}
@@ -512,6 +505,7 @@
                                     {view}
                                     fileType={FileType.changed}
                                     topLevel={true}
+                                    bind:closed={unstagedClosed}
                                 />
                             {:else}
                                 {#each arrayProxyWithNewLength(status.changed, 500) as change}
@@ -576,6 +570,7 @@
                                         {view}
                                         fileType={FileType.pulled}
                                         topLevel={true}
+                                        bind:closed={pulledClosed}
                                     />
                                 {:else}
                                     {#each lastPulledFiles as change}

@@ -1,5 +1,4 @@
 import { Errors } from "isomorphic-git";
-import * as path from "path";
 import type { Debouncer, Menu, TAbstractFile, WorkspaceLeaf } from "obsidian";
 import {
     debounce,
@@ -10,7 +9,10 @@ import {
     Platform,
     Plugin,
     TFile,
+    TFolder,
+    moment,
 } from "obsidian";
+import * as path from "path";
 import { LineAuthoringFeature } from "src/lineAuthor/lineAuthorIntegration";
 import { pluginRef } from "src/pluginGlobalRef";
 import { PromiseQueue } from "src/promiseQueue";
@@ -24,13 +26,14 @@ import {
     DEFAULT_SETTINGS,
     DIFF_VIEW_CONFIG,
     HISTORY_VIEW_CONFIG,
-    SPLIT_DIFF_VIEW_CONFIG,
     SOURCE_CONTROL_VIEW_CONFIG,
+    SPLIT_DIFF_VIEW_CONFIG,
 } from "./constants";
 import type { GitManager } from "./gitManager/gitManager";
 import { IsomorphicGit } from "./gitManager/isomorphicGit";
 import { SimpleGit } from "./gitManager/simpleGit";
 import { LocalStorageSettings } from "./setting/localStorageSettings";
+import Tools from "./tools";
 import type {
     FileStatusResult,
     ObsidianGitSettings,
@@ -39,19 +42,25 @@ import type {
     UnstagedFile,
 } from "./types";
 import {
+    CurrentGitAction,
     mergeSettingsByPriority,
     NoNetworkError,
-    CurrentGitAction,
 } from "./types";
 import DiffView from "./ui/diff/diffView";
+import SplitDiffView from "./ui/diff/splitDiffView";
 import HistoryView from "./ui/history/historyView";
 import { BranchModal } from "./ui/modals/branchModal";
 import { GeneralModal } from "./ui/modals/generalModal";
 import GitView from "./ui/sourceControl/sourceControl";
 import { BranchStatusBar } from "./ui/statusBar/branchStatusBar";
-import { formatRemoteUrl, splitRemoteBranch } from "./utils";
-import Tools from "./tools";
-import SplitDiffView from "./ui/diff/splitDiffView";
+import {
+    assertNever,
+    convertPathToAbsoluteGitignoreRule,
+    formatRemoteUrl,
+    spawnAsync,
+    splitRemoteBranch,
+} from "./utils";
+import { DiscardModal, type DiscardResult } from "./ui/modals/discardModal";
 
 export default class ObsidianGit extends Plugin {
     gitManager: GitManager;
@@ -69,6 +78,10 @@ export default class ObsidianGit extends Plugin {
     lastPulledFiles: FileStatusResult[];
     gitReady = false;
     promiseQueue: PromiseQueue = new PromiseQueue(this);
+
+    /**
+     * Debouncer for the auto commit after file changes.
+     */
     autoCommitDebouncer: Debouncer<[], void> | undefined;
     cachedStatus: Status | undefined;
     // Used to store the path of the file that is currently shown in the diff view.
@@ -76,6 +89,9 @@ export default class ObsidianGit extends Plugin {
     intervalsToClear: number[] = [];
     lineAuthoringFeature: LineAuthoringFeature = new LineAuthoringFeature(this);
 
+    /**
+     * Debouncer for the refresh of the git status for the source control view after file changes.
+     */
     debRefresh: Debouncer<[], void>;
 
     setPluginState(state: Partial<PluginState>): void {
@@ -319,10 +335,22 @@ export default class ObsidianGit extends Plugin {
         );
     }
 
-    async addFileToGitignore(filePath: string): Promise<void> {
+    async addFileToGitignore(
+        filePath: string,
+        isFolder?: boolean
+    ): Promise<void> {
+        const gitRelativePath = this.gitManager.getRelativeRepoPath(
+            filePath,
+            true
+        );
+        // Define an absolute rule that can apply only for this item.
+        const gitignoreRule = convertPathToAbsoluteGitignoreRule({
+            isFolder,
+            gitRelativePath,
+        });
         await this.app.vault.adapter.append(
             this.gitManager.getRelativeVaultPath(".gitignore"),
-            "\n" + this.gitManager.getRelativeRepoPath(filePath, true)
+            "\n" + gitignoreRule
         );
         return this.refresh();
     }
@@ -351,7 +379,7 @@ export default class ObsidianGit extends Plugin {
                     .onClick((_) => {
                         this.promiseQueue.addTask(async () => {
                             if (file instanceof TFile) {
-                                await this.gitManager.stage(file.path, true);
+                                await this.stageFile(file);
                             } else {
                                 await this.gitManager.stageAll({
                                     dir: this.gitManager.getRelativeRepoPath(
@@ -359,8 +387,10 @@ export default class ObsidianGit extends Plugin {
                                         true
                                     ),
                                 });
+                                this.app.workspace.trigger(
+                                    "obsidian-git:refresh"
+                                );
                             }
-                            this.displayMessage(`Staged ${filePath}`);
                         });
                     });
             });
@@ -371,7 +401,7 @@ export default class ObsidianGit extends Plugin {
                     .onClick((_) => {
                         this.promiseQueue.addTask(async () => {
                             if (file instanceof TFile) {
-                                await this.gitManager.unstage(file.path, true);
+                                await this.unstageFile(file);
                             } else {
                                 await this.gitManager.unstageAll({
                                     dir: this.gitManager.getRelativeRepoPath(
@@ -379,8 +409,11 @@ export default class ObsidianGit extends Plugin {
                                         true
                                     ),
                                 });
+
+                                this.app.workspace.trigger(
+                                    "obsidian-git:refresh"
+                                );
                             }
-                            this.displayMessage(`Unstaged ${filePath}`);
                         });
                     });
             });
@@ -389,9 +422,10 @@ export default class ObsidianGit extends Plugin {
                     .setIcon("file-x")
                     .setSection("action")
                     .onClick((_) => {
-                        this.addFileToGitignore(filePath).catch((e) =>
-                            this.displayError(e)
-                        );
+                        this.addFileToGitignore(
+                            filePath,
+                            file instanceof TFolder
+                        ).catch((e) => this.displayError(e));
                     });
             });
         }
@@ -402,9 +436,10 @@ export default class ObsidianGit extends Plugin {
                     .setIcon("file-x")
                     .setSection("action")
                     .onClick((_) => {
-                        this.addFileToGitignore(filePath).catch((e) =>
-                            this.displayError(e)
-                        );
+                        this.addFileToGitignore(
+                            filePath,
+                            file instanceof TFolder
+                        ).catch((e) => this.displayError(e));
                     });
             });
             const gitManager = this.app.vault.adapter;
@@ -466,6 +501,8 @@ export default class ObsidianGit extends Plugin {
         this.automaticsManager.unload();
         this.branchBar?.remove();
         this.statusBar?.remove();
+        this.statusBar = undefined;
+        this.branchBar = undefined;
         this.gitManager.unload();
         this.promiseQueue.clear();
 
@@ -503,7 +540,7 @@ export default class ObsidianGit extends Plugin {
     }
 
     async init({ fromReload = false }): Promise<void> {
-        if (this.settings.showStatusBar) {
+        if (this.settings.showStatusBar && !this.statusBar) {
             const statusBarEl = this.addStatusBarItem();
             this.statusBar = new StatusBar(statusBarEl, this);
             this.intervalsToClear.push(
@@ -520,6 +557,7 @@ export default class ObsidianGit extends Plugin {
             }
 
             const result = await this.gitManager.checkRequirements();
+            const pausedAutomatics = this.localStorage.getPausedAutomatics();
             switch (result) {
                 case "missing-git":
                     this.displayError(
@@ -538,7 +576,8 @@ export default class ObsidianGit extends Plugin {
 
                     if (
                         Platform.isDesktop &&
-                        this.settings.showBranchStatusBar
+                        this.settings.showBranchStatusBar &&
+                        !this.branchBar
                     ) {
                         const branchStatusBarEl = this.addStatusBarItem();
                         this.branchBar = new BranchStatusBar(
@@ -563,12 +602,24 @@ export default class ObsidianGit extends Plugin {
                     /// Among other things, this notifies the history view that git is ready
                     this.app.workspace.trigger("obsidian-git:head-change");
 
-                    if (!fromReload && this.settings.autoPullOnBoot) {
+                    if (
+                        !fromReload &&
+                        this.settings.autoPullOnBoot &&
+                        !pausedAutomatics
+                    ) {
                         this.promiseQueue.addTask(() =>
                             this.pullChangesFromRemote()
                         );
                     }
-                    await this.automaticsManager.init();
+
+                    if (!pausedAutomatics) {
+                        await this.automaticsManager.init();
+                    }
+
+                    if (pausedAutomatics) {
+                        new Notice("Automatic routines are currently paused.");
+                    }
+
                     break;
                 default:
                     this.log(
@@ -656,6 +707,11 @@ export default class ObsidianGit extends Plugin {
                 allowEmpty: true,
             }).openAndGetResult();
             let depthInt = undefined;
+            if (depth === undefined) {
+                new Notice("Aborted clone");
+                return;
+            }
+
             if (depth !== "") {
                 depthInt = parseInt(depth);
                 if (isNaN(depthInt)) {
@@ -725,11 +781,17 @@ export default class ObsidianGit extends Plugin {
         this.setPluginState({ gitAction: CurrentGitAction.idle });
     }
 
-    async commitAndSync(
-        fromAutoBackup: boolean,
+    async commitAndSync({
+        fromAutoBackup,
         requestCustomMessage = false,
-        commitMessage?: string
-    ): Promise<void> {
+        commitMessage,
+        onlyStaged = false,
+    }: {
+        fromAutoBackup: boolean;
+        requestCustomMessage?: boolean;
+        commitMessage?: string;
+        onlyStaged?: boolean;
+    }): Promise<void> {
         if (!(await this.isAllInitialized())) return;
 
         if (
@@ -743,6 +805,7 @@ export default class ObsidianGit extends Plugin {
             fromAuto: fromAutoBackup,
             requestCustomMessage,
             commitMessage,
+            onlyStaged,
         });
         if (!commitSuccessful) {
             return;
@@ -787,9 +850,9 @@ export default class ObsidianGit extends Plugin {
         try {
             let hadConflict = this.localStorage.getConflict();
 
-            let changedFiles: { vaultPath: string; path: string }[];
             let status: Status | undefined;
-            let unstagedFiles: UnstagedFile[] | undefined;
+            let stagedFiles: { vaultPath: string; path: string }[] = [];
+            let unstagedFiles: (UnstagedFile & { vaultPath: string })[] = [];
 
             if (this.gitManager instanceof SimpleGit) {
                 await this.mayDeleteConflictFile();
@@ -812,7 +875,12 @@ export default class ObsidianGit extends Plugin {
                     await this.handleConflict(status.conflicted);
                     return false;
                 }
-                changedFiles = [...status.changed, ...status.staged];
+                stagedFiles = status.staged;
+
+                // This typecast is only needed to hide the fact that `type` is missing, but that is only needed for isomorphic-git
+                unstagedFiles = status.changed as unknown as (UnstagedFile & {
+                    vaultPath: string;
+                })[];
             } else {
                 // isomorphic-git section
 
@@ -825,34 +893,47 @@ export default class ObsidianGit extends Plugin {
                         `Did not commit, because you have conflicts. Please resolve them and commit per command.`
                     );
                     return false;
-                } else if (hadConflict) {
-                    await this.mayDeleteConflictFile();
-                    status = await this.updateCachedStatus();
-                    changedFiles = [...status.changed, ...status.staged];
                 } else {
+                    if (hadConflict) {
+                        await this.mayDeleteConflictFile();
+                    }
                     const gitManager = this.gitManager as IsomorphicGit;
                     if (onlyStaged) {
-                        changedFiles = await gitManager.getStagedFiles();
+                        stagedFiles = await gitManager.getStagedFiles();
                     } else {
-                        unstagedFiles = await gitManager.getUnstagedFiles();
-                        changedFiles = unstagedFiles.map(({ path }) => ({
+                        const res = await gitManager.getUnstagedFiles();
+                        unstagedFiles = res.map(({ path, type }) => ({
                             vaultPath:
                                 this.gitManager.getRelativeVaultPath(path),
                             path,
+                            type,
                         }));
                     }
                 }
             }
 
-            if (await this.tools.hasTooBigFiles(changedFiles)) {
+            if (
+                await this.tools.hasTooBigFiles(
+                    onlyStaged
+                        ? stagedFiles
+                        : [...stagedFiles, ...unstagedFiles]
+                )
+            ) {
                 this.setPluginState({ gitAction: CurrentGitAction.idle });
                 return false;
             }
 
-            if (changedFiles.length !== 0 || hadConflict) {
+            if (
+                unstagedFiles.length + stagedFiles.length !== 0 ||
+                hadConflict
+            ) {
+                // The commit message from settings or previously set in the
+                // source control view
                 let cmtMessage = (commitMessage ??= fromAuto
                     ? this.settings.autoCommitMessage
                     : this.settings.commitMessage);
+
+                // Optionally ask the user via a modal for a commit message
                 if (
                     (fromAuto && this.settings.customMessageOnAutoBackup) ||
                     requestCustomMessage
@@ -862,21 +943,53 @@ export default class ObsidianGit extends Plugin {
                             "Auto backup: Please enter a custom commit message. Leave empty to abort"
                         );
                     }
-                    const tempMessage = await new CustomMessageModal(
+                    const modalMessage = await new CustomMessageModal(
                         this
                     ).openAndGetResult();
 
                     if (
-                        tempMessage != undefined &&
-                        tempMessage != "" &&
-                        tempMessage != "..."
+                        modalMessage != undefined &&
+                        modalMessage != "" &&
+                        modalMessage != "..."
                     ) {
-                        cmtMessage = tempMessage;
+                        cmtMessage = modalMessage;
                     } else {
                         this.setPluginState({
                             gitAction: CurrentGitAction.idle,
                         });
                         return false;
+                    }
+
+                    // On desktop may run a script to get the commit message
+                } else if (
+                    this.gitManager instanceof SimpleGit &&
+                    this.settings.commitMessageScript
+                ) {
+                    const templateScript = this.settings.commitMessageScript;
+                    const hostname = this.localStorage.getHostname() || "";
+                    let formattedScript = templateScript.replace(
+                        "{{hostname}}",
+                        hostname
+                    );
+
+                    formattedScript = formattedScript.replace(
+                        "{{date}}",
+                        moment().format(this.settings.commitDateFormat)
+                    );
+
+                    const res = await spawnAsync(
+                        "sh",
+                        ["-c", formattedScript],
+                        { cwd: this.gitManager.absoluteRepoPath }
+                    );
+                    if (res.code != 0) {
+                        this.displayError(res.stderr);
+                    } else if (res.stdout.trim().length == 0) {
+                        this.displayMessage(
+                            "Stdout from commit message script is empty. Using default message."
+                        );
+                    } else {
+                        cmtMessage = res.stdout;
                     }
                 }
                 let committedFiles: number | undefined;
@@ -902,7 +1015,8 @@ export default class ObsidianGit extends Plugin {
                 let roughly = false;
                 if (committedFiles === undefined) {
                     roughly = true;
-                    committedFiles = changedFiles.length;
+                    committedFiles =
+                        unstagedFiles.length + stagedFiles.length || 0;
                 }
                 this.displayMessage(
                     `Committed${roughly ? " approx." : ""} ${committedFiles} ${
@@ -1044,7 +1158,6 @@ export default class ObsidianGit extends Plugin {
         if (!(await this.isAllInitialized())) return false;
 
         await this.gitManager.stage(file.path, true);
-        this.displayMessage(`Staged ${file.path}`);
 
         this.app.workspace.trigger("obsidian-git:refresh");
 
@@ -1056,7 +1169,6 @@ export default class ObsidianGit extends Plugin {
         if (!(await this.isAllInitialized())) return false;
 
         await this.gitManager.unstage(file.path, true);
-        this.displayMessage(`Unstaged ${file.path}`);
 
         this.app.workspace.trigger("obsidian-git:refresh");
 
@@ -1177,12 +1289,72 @@ export default class ObsidianGit extends Plugin {
         }
     }
 
-    async discardAll() {
-        await this.gitManager.discardAll({
-            status: this.cachedStatus,
-        });
-        new Notice("所有本地更改均已放弃。新文件保持不变。");
+    async discardAll(path?: string): Promise<DiscardResult> {
+        if (!(await this.isAllInitialized())) return false;
+
+        const status = await this.gitManager.status({ path });
+
+        let filesToDeleteCount = 0;
+        let filesToDiscardCount = 0;
+        for (const file of status.changed) {
+            if (file.workingDir == "U") {
+                filesToDeleteCount++;
+            } else {
+                filesToDiscardCount++;
+            }
+        }
+        if (filesToDeleteCount + filesToDiscardCount == 0) {
+            return false;
+        }
+
+        const result = await new DiscardModal({
+            app: this.app,
+            filesToDeleteCount,
+            filesToDiscardCount,
+            path: path ?? "",
+        }).openAndGetResult();
+
+        switch (result) {
+            case false:
+                return result;
+            case "discard":
+                await this.gitManager.discardAll({
+                    dir: path,
+                    status: this.cachedStatus,
+                });
+                break;
+            case "delete": {
+                await this.gitManager.discardAll({
+                    dir: path,
+                    status: this.cachedStatus,
+                });
+                const untrackedPaths = await this.gitManager.getUntrackedPaths({
+                    path,
+                    status: this.cachedStatus,
+                });
+                for (const file of untrackedPaths) {
+                    const vaultPath =
+                        this.gitManager.getRelativeVaultPath(file);
+                    const tFile =
+                        this.app.vault.getAbstractFileByPath(vaultPath);
+
+                    if (tFile) {
+                        await this.app.fileManager.trashFile(tFile);
+                    } else {
+                        if (file.endsWith("/")) {
+                            await this.app.vault.adapter.rmdir(vaultPath, true);
+                        } else {
+                            await this.app.vault.adapter.remove(vaultPath);
+                        }
+                    }
+                }
+                break;
+            }
+            default:
+                assertNever(result);
+        }
         this.app.workspace.trigger("obsidian-git:refresh");
+        return result;
     }
 
     async handleConflict(conflicted?: string[]): Promise<void> {
@@ -1238,7 +1410,10 @@ I strongly recommend to use "Source mode" for viewing the conflicted files. For 
         if (remoteName) {
             const oldUrl = await this.gitManager.getRemoteUrl(remoteName);
 
-            const urlModal = new GeneralModal(this, { initialValue: oldUrl });
+            const urlModal = new GeneralModal(this, {
+                initialValue: oldUrl,
+                placeholder: "Enter remote URL",
+            });
             // urlModal.inputEl.setText(oldUrl ?? "");
             const remoteURL = await urlModal.openAndGetResult();
             if (remoteURL) {
@@ -1279,7 +1454,13 @@ I strongly recommend to use "Source mode" for viewing the conflicted files. For 
                 placeholder:
                     "Select or create a new remote branch by typing its name and selecting it",
             });
-            return await branchModal.openAndGetResult();
+            const branch = await branchModal.openAndGetResult();
+            if (branch == undefined) return;
+            if (!branch.startsWith(remoteName + "/")) {
+                // If the branch does not start with the remote name, prepend it
+                return `${remoteName}/${branch}`;
+            }
+            return branch; // Already in the correct format
         }
     }
 
@@ -1317,10 +1498,10 @@ I strongly recommend to use "Source mode" for viewing the conflicted files. For 
 
         // Clear existing active state
         sourceControlLeaf?.view.containerEl
-            .querySelector(`div.nav-file-title.is-active`)
+            .querySelector(`div.tree-item-self.is-active`)
             ?.removeClass("is-active");
         historyLeaf?.view.containerEl
-            .querySelector(`div.nav-file-title.is-active`)
+            .querySelector(`div.tree-item-self.is-active`)
             ?.removeClass("is-active");
 
         if (
@@ -1328,19 +1509,20 @@ I strongly recommend to use "Source mode" for viewing the conflicted files. For 
             leaf?.view instanceof SplitDiffView
         ) {
             const path = leaf.view.state.bFile;
+            const escapedPath = path.replace(/["\\]/g, "\\$&");
             this.lastDiffViewState = leaf.view.getState();
             let el: Element | undefined | null;
             if (sourceControlLeaf && leaf.view.state.aRef == "HEAD") {
                 el = sourceControlLeaf.view.containerEl.querySelector(
-                    `div.staged div.nav-file-title[data-path='${path}']`
+                    `div.staged div.tree-item-self[data-path="${escapedPath}"]`
                 );
             } else if (sourceControlLeaf && leaf.view.state.aRef == "") {
                 el = sourceControlLeaf.view.containerEl.querySelector(
-                    `div.changes div.nav-file-title[data-path='${path}']`
+                    `div.changes div.tree-item-self[data-path="${escapedPath}"]`
                 );
             } else if (historyLeaf) {
                 el = historyLeaf.view.containerEl.querySelector(
-                    `div.nav-file-title[data-path='${path}']`
+                    `div.tree-item-self[data-path='${escapedPath}']`
                 );
             }
             el?.addClass("is-active");
@@ -1393,7 +1575,9 @@ I strongly recommend to use "Source mode" for viewing the conflicted files. For 
         }
 
         this.setPluginState({ gitAction: CurrentGitAction.idle });
-        new Notice(error.message, timeout);
+        if (this.settings.showErrorNotices) {
+            new Notice(error.message, timeout);
+        }
         console.error(`${this.manifest.id}:`, error.stack);
         this.statusBar?.displayMessage(error.message.toLowerCase(), timeout);
     }
