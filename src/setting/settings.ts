@@ -704,9 +704,7 @@ export class ObsidianGitSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName("高级")
-            .setDesc(
-                "这些设置通常无需更改，但特殊设置可能需要更改。"
-            )
+            .setDesc("这些设置通常无需更改，但特殊设置可能需要更改。")
             .setHeading();
 
         if (plugin.gitManager instanceof SimpleGit) {
