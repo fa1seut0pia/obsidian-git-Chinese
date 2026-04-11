@@ -172,8 +172,8 @@ export function getDisplayPath(path: string): string {
 }
 
 export function formatMinutes(minutes: number): string {
-    if (minutes === 1) return "1 minute";
-    return `${minutes} minutes`;
+    if (minutes === 1) return "1 分钟";
+    return `${minutes} 分钟`;
 }
 
 export function getExtensionFromPath(path: string): string {

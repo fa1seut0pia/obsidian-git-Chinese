@@ -345,25 +345,23 @@ export function addCommmands(plugin: ObsidianGit) {
             );
             if (repoExists) {
                 const modal = new GeneralModal(plugin, {
-                    options: ["NO", "YES"],
+                    options: ["否", "是"],
                     placeholder:
-                        "Do you really want to delete the repository (.git directory)? plugin action cannot be undone.",
+                        "你真的要删除仓库（.git 目录）吗？此操作无法撤销。",
                     onlySelection: true,
                 });
-                const shouldDelete = (await modal.openAndGetResult()) === "YES";
+                const shouldDelete = (await modal.openAndGetResult()) === "是";
                 if (shouldDelete) {
                     await app.vault.adapter.rmdir(
                         `${plugin.settings.basePath}/.git`,
                         true
                     );
-                    new Notice(
-                        "Successfully deleted repository. Reloading plugin..."
-                    );
+                    new Notice("成功删除仓库。正在重新加载插件...");
                     plugin.unloadPlugin();
                     await plugin.init({ fromReload: true });
                 }
             } else {
-                new Notice("No repository found");
+                new Notice("未找到仓库");
             }
         },
     });
@@ -433,10 +431,10 @@ export function addCommmands(plugin: ObsidianGit) {
             const res = await plugin.discardAll();
             switch (res) {
                 case "discard":
-                    new Notice("Discarded all changes in tracked files.");
+                    new Notice("已放弃所有已跟踪文件的更改。");
                     break;
                 case "delete":
-                    new Notice("Discarded all files.");
+                    new Notice("已放弃所有文件的更改。");
                     break;
                 case false:
                     break;
@@ -454,10 +452,10 @@ export function addCommmands(plugin: ObsidianGit) {
             plugin.localStorage.setPausedAutomatics(pause);
             if (pause) {
                 plugin.automaticsManager.unload();
-                new Notice(`Paused automatic routines.`);
+                new Notice(`已暂停自动例程。`);
             } else {
                 plugin.automaticsManager.reload("commit", "push", "pull");
-                new Notice(`Resumed automatic routines.`);
+                new Notice(`已恢复自动例程。`);
             }
         },
     });
