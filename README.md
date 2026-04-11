@@ -1,3 +1,16 @@
+obsidian-git 是个很好用的插件
+
+此仓库主要是把配置选项翻译成中文, 如有错误和遗漏, 欢迎反馈
+
+使用方式:  下载 [Releases](../../releases) 中的 `obsidian-git-<版本号>.zip` ，解压后替换掉笔记目录内 `.obsidian\plugins\obsidian-git` ,然后重启 Obsidian 即可
+
+README 也做了翻译, 在这里 [README.zn-cn.md](README.zh-cn.md)
+
+![chinese-config.png](./images/chinese-config.png)
+
+<details>
+  <summary>这里是原始内容</summary>
+
 # Obsidian Git Plugin
 
 A powerful community plugin for [Obsidian.md](Obsidian.md) that brings Git integration right into your vault. Automatically commit, pull, push, and see your changes — all within Obsidian.
@@ -137,3 +150,5 @@ If you have a large repo/vault I recommend to stage individual files and only co
 If you find this plugin useful and would like to support its development, you can support me on Ko-fi.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/F1F195IQ5)
+
+</details>
